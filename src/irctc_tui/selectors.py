@@ -13,6 +13,11 @@ matches (see ``automation._first``). Candidates use Playwright selector syntax:
 * XPath (``xpath=//a[normalize-space()='LOGIN']``)
 
 Put the most specific/stable candidate first and looser fallbacks after.
+
+To check which candidates still match the live site (and discover new control
+ids/formcontrolnames when IRCTC changes its DOM), run::
+
+    python -m irctc_tui.recon           # prints a ✓/✗ report per group
 """
 
 from __future__ import annotations
@@ -87,6 +92,7 @@ LOGGED_IN_MARKERS = [
 # --------------------------------------------------------------------------- #
 
 FROM_STATION_INPUT = [
+    "#origin input",
     'p-autocomplete[formcontrolname="origin"] input',
     "#origin",
     'input[aria-controls="pr_id_1_list"]',
@@ -94,6 +100,7 @@ FROM_STATION_INPUT = [
 ]
 
 TO_STATION_INPUT = [
+    "#destination input",
     'p-autocomplete[formcontrolname="destination"] input',
     "#destination",
     'input[aria-controls="pr_id_2_list"]',
@@ -255,6 +262,7 @@ AUTO_UPGRADE_CHECKBOX = [
 ]
 
 PASSENGER_CONTINUE_BUTTON = [
+    "#nextButton",
     'button:has-text("Continue")',
     "#psgn-form button.train_Search",
     "xpath=//button[normalize-space()='Continue']",
