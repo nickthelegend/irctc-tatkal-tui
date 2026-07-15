@@ -119,6 +119,28 @@ python -m irctc_tui       # equivalent module form
 | `F2` | Pre-flight selector check |
 | `Ctrl+Q` | Quit (closes the browser) |
 
+### Quick check without the TUI — `irctc-search`
+
+The CLI can do the whole search + parse in one shot (no TUI): it launches the
+tool's own browser, fills the search on IRCTC, parses the results, and prints a
+trains table.
+
+```bash
+irctc-search --from SC --to TPTY --date 24-07-2026 --class SL --quota GENERAL
+```
+
+```
+TRAIN                    NO.    DEP    ARR    SL STATUS      FARE    OTHER
+------------------------------------------------------------------------------
+ KRISHNA EXPRESS         17406  05:55  21:40  WL30           ₹415    3A
+ RXL TPTY EXP            17434  19:05  09:30  REGRET         ₹415    3A 2A
+➡ target: KRISHNA EXPRESS (17406) — SL WL30 → not bookable (waitlist/regret)
+```
+
+*(That's real output — the CLI's own browser + parser reading real IRCTC results.)*
+Add `--headed` to watch it, or `--results-url <file/URL>` to parse an already-open
+results page.
+
 ## The tabs
 
 | Tab | What you set |
@@ -356,11 +378,11 @@ tests/              # config, selectors, alarm, notify, recon, and TUI tests
 
 ```bash
 uv pip install -e ".[dev]"
-pytest            # 61 tests (incl. parser vs REAL captured IRCTC HTML)
+pytest            # 64 tests (incl. parser vs REAL captured IRCTC HTML)
 ruff check src/   # lint
 ```
 
-Two console entry points are installed: **`irctc-tui`** (the app) and
+Three console entry points are installed: **`irctc-tui`** (the app),
 **`irctc-recon`** (the selector verifier).
 
 ## Responsible use & disclaimer

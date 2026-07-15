@@ -33,6 +33,7 @@ Issues = "https://github.com/nickthelegend/irctc-tatkal-tui/issues"
 [project.scripts]
 irctc-tui = "irctc_tui.cli:main"
 irctc-recon = "irctc_tui.recon:main"
+irctc-search = "irctc_tui.search_cli:main"
 
 [build-system]
 requires = ["hatchling"]
