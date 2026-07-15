@@ -1,0 +1,52 @@
+[project]
+name = "irctc-tatkal-tui"
+version = "0.1.0"
+description = "A terminal UI that automates IRCTC Tatkal train-ticket form-filling with Playwright (human solves CAPTCHA and payment)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Nivesh Gajengi" }]
+keywords = ["irctc", "tatkal", "playwright", "tui", "textual", "train", "booking", "automation"]
+classifiers = [
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    "playwright>=1.45",
+    "textual>=0.60",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/nickthelegend/irctc-tatkal-tui"
+Repository = "https://github.com/nickthelegend/irctc-tatkal-tui"
+Issues = "https://github.com/nickthelegend/irctc-tatkal-tui/issues"
+
+[project.scripts]
+irctc-tui = "irctc_tui.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/irctc_tui"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

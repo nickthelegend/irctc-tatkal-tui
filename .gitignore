@@ -1,0 +1,55 @@
+# ---- IRCTC Tatkal TUI ----
+# Local user configuration may contain IRCTC username/password — NEVER commit it.
+config.json
+*.config.json
+.secrets
+.env
+.env.*
+
+# Playwright browser storage / session state (contains auth cookies)
+storage_state.json
+*.storage.json
+
+# Runtime artifacts
+screenshots/
+logs/
+*.log
+recordings/
+trace.zip
+*.trace.zip
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# uv
+uv.lock
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
