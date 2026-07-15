@@ -49,7 +49,14 @@ bookings.
 - **Scheduled start** — arm it before 10:00/11:00 AM and let it fire the moment
   the Tatkal window opens.
 - **Human-in-the-loop by design** — it pauses for you at login, CAPTCHA, and
-  payment.
+  payment. The **headed browser stays open** at the payment screen so you finish
+  the payment yourself.
+- **🔔 Completion alarm** — when a seat is found / the payment hand-off is
+  reached, it **rings a looping alarm until you silence it**, so you can walk
+  away and be called back. Bring your own `.wav`/`.mp3` or use the built-in tune.
+- **🔎 Live selector verifier** (`irctc-recon`) — inspect the real IRCTC DOM and
+  see exactly which selectors still match, so you can keep the tool working when
+  the site changes.
 - **Config saved to disk** (git-ignored) so you never re-type your journey.
 - **All selectors centralized** in one file — trivial to fix when IRCTC changes
   its DOM.
@@ -87,8 +94,9 @@ python -m irctc_tui       # equivalent module form
 2. Press **F5** to validate, **Ctrl+S** to save.
 3. Go to the **Run** tab and press **▶ Start** (or **Ctrl+R**).
 4. Watch the browser. When it opens the login modal, **you** solve the CAPTCHA
-   and sign in. When a seat is available it fills passenger details; at the
-   payment/CAPTCHA step it hands the browser back to **you**.
+   and sign in. When a seat is available it fills passenger details and **starts
+   the alarm**; at the payment/CAPTCHA step it hands the browser back to **you**
+   (the alarm keeps ringing until you press **Ctrl+G** / **🔕 Silence**).
 
 ### Keyboard shortcuts
 
@@ -99,6 +107,7 @@ python -m irctc_tui       # equivalent module form
 | `F5` | Validate config |
 | `Ctrl+R` | Start booking run |
 | `Ctrl+T` | Stop (graceful) |
+| `Ctrl+G` | Silence the alarm |
 | `Ctrl+Q` | Quit (closes the browser) |
 
 ## The tabs
@@ -109,8 +118,8 @@ python -m irctc_tui       # equivalent module form
 | **Passengers** | Add/remove travellers — name, age, gender, berth & food preference. |
 | **Account** | IRCTC username, optional password, auto-login and session-reuse toggles. |
 | **Timing** | Poll interval, jitter, scheduled start time, max attempts, retry-on-error. |
-| **Browser** | Auto-book toggle, headed/headless, browser engine, slow-mo, screenshots, contact mobile, UPI id (shown only). |
-| **Run** | Live status (phase, attempts, availability, next-check countdown), Start/Stop, and a colour-coded event log. |
+| **Browser** | Auto-book toggle, headed/headless, browser engine, slow-mo, screenshots, contact mobile, UPI id (shown only), **alarm-on-success toggle + custom alarm sound**. |
+| **Run** | Live status (phase, attempts, availability, next-check countdown), Start/Stop, **🔔 Test alarm / 🔕 Silence**, and a colour-coded event log. |
 
 <p align="center">
   <img src="docs/tui-journey.svg" alt="Journey tab" width="420">
@@ -136,15 +145,18 @@ wait until start time (if set)      e.g. hold until 11:00:00
 │  POLL LOOP (every X seconds) │
 │  fill search → read status   │◄─── not available? sleep, retry
 └──────────────┬──────────────┘
-        │ available / RAC
+        │ available / RAC   ──►  🔔 ALARM STARTS (rings until you silence it)
         ▼
 click Book Now → fill all passengers
         │
         ▼
 reach review / payment  ──►  ⏸  YOU solve the CAPTCHA + pay
+                               (headed browser stays open — the alarm keeps
+                                ringing so you know to come pay)
 ```
 
-The tool **stops at every ⏸**. It never touches the CAPTCHA or the payment.
+The tool **stops at every ⏸**. It never touches the CAPTCHA or the payment, and
+the browser is left open for you to finish.
 
 ## Configuration reference
 
@@ -163,6 +175,7 @@ The TUI reads and writes `./config.json`. You can also hand-edit it. See
                 "max_attempts": 0, "retry_on_error": true },
   "behavior": { "auto_book_when_available": true, "stop_before_payment": true,
                 "upi_id": "", "contact_mobile": "", "save_screenshots": true,
+                "alarm_on_success": true, "alarm_sound_path": "",
                 "headed": true, "slow_mo_ms": 0, "browser": "chromium" }
 }
 ```
@@ -177,6 +190,8 @@ The TUI reads and writes `./config.json`. You can also hand-edit it. See
 | `timing.jitter_seconds` | Random 0–N s added to each interval so requests aren't perfectly periodic. |
 | `timing.start_time` | `HH:MM:SS` to hold the first search until. Blank = start now. |
 | `behavior.auto_book_when_available` | When free, proceed into passenger entry automatically. |
+| `behavior.alarm_on_success` | Ring a looping alarm when a seat is found / payment hand-off is reached. |
+| `behavior.alarm_sound_path` | Path to your own `.wav`/`.mp3`. Blank = a built-in tune synthesised on first use. |
 | `behavior.headed` | Headed browser (default). Headless is offered for dry-runs but IRCTC blocks it. |
 
 > Your `config.json` may contain your IRCTC username/password in plaintext. It is
@@ -191,15 +206,48 @@ The TUI reads and writes `./config.json`. You can also hand-edit it. See
 - Have **auto-login on**, be signed in early (solve the login CAPTCHA in advance),
   and let the poll loop hit *Search → Book Now* the instant the window opens.
 
+## 🔔 The completion alarm
+
+When a seat becomes bookable (and again at the payment hand-off), the tool starts
+a **looping alarm that rings until you silence it** — press **🔕 Silence** on the
+Run tab or **Ctrl+G**. Walk away and let it call you back.
+
+- **Bring your own song:** set `behavior.alarm_sound_path` (or the *Alarm sound
+  file* field) to any `.wav`/`.mp3`. Leave it blank for a built-in chime that is
+  synthesised on first use into `~/.cache/irctc-tui/alarm.wav` (no copyrighted
+  audio is bundled).
+- **Test it first:** press **🔔 Test alarm** on the Run tab to make sure your
+  speakers work — then silence it.
+- Playback uses your OS player (`afplay` on macOS, `paplay`/`aplay`/`ffplay`/
+  `mpg123` on Linux, `winsound` on Windows), falling back to the terminal bell.
+
+## 🔎 Verify selectors against the live site (`irctc-recon`)
+
+IRCTC's DOM shifts between releases. Instead of guessing, point the built-in
+recon tool at the real site — it opens the search page, lists every form control
+it finds, and prints a ✓/✗ report of which `selectors.py` candidates still match:
+
+```bash
+irctc-recon                 # headless; verify selectors + list controls
+irctc-recon --headed        # watch it in a real Chromium window
+irctc-recon --json dom.json # also dump the discovered controls to JSON
+python -m irctc_tui.recon   # equivalent module form
+```
+
+Read the `⚠ NONE matched` / `✗` lines, then update that group in
+[`src/irctc_tui/selectors.py`](src/irctc_tui/selectors.py). Run it from a network
+that can reach IRCTC (some sandboxes/proxies block it).
+
 ## When IRCTC changes its DOM (troubleshooting)
 
 IRCTC's Angular site changes often. If a step stops working:
 
-1. Run with `save_screenshots` on and look in `screenshots/` to see where it got
+1. Run `irctc-recon` (above) to see which selector groups no longer match.
+2. Run with `save_screenshots` on and look in `screenshots/` to see where it got
    stuck.
-2. Open [`src/irctc_tui/selectors.py`](src/irctc_tui/selectors.py) — **every**
+3. Open [`src/irctc_tui/selectors.py`](src/irctc_tui/selectors.py) — **every**
    selector lives there as a list of fallbacks. Add or reorder candidates.
-3. The browser is headed — you can always finish the step by hand and the tool
+4. The browser is headed — you can always finish the step by hand and the tool
    picks up from the visible page.
 
 Common tweaks: the station autocomplete, the journey-date calendar, and the
@@ -213,19 +261,24 @@ src/irctc_tui/
 ├── app.tcss        # TUI stylesheet
 ├── automation.py   # Playwright engine: search, poll, book, hand off
 ├── selectors.py    # ALL IRCTC selectors + availability parsing  ← edit when DOM changes
+├── recon.py        # live DOM inspector + selector verifier (irctc-recon)
+├── alarm.py        # cross-platform looping completion alarm
 ├── config.py       # dataclasses + JSON load/save/validate
 ├── events.py       # BotEvent/Phase/Level passed to the UI
 └── cli.py          # entry point
-tests/              # config, selectors, and headless TUI tests
+tests/              # config, selectors, alarm, and headless TUI tests
 ```
 
 ## Development
 
 ```bash
 uv pip install -e ".[dev]"
-pytest            # 24 tests; TUI tests use Textual's pilot — no browser needed
+pytest            # 28 tests; TUI tests use Textual's pilot — no browser needed
 ruff check src/   # lint
 ```
+
+Two console entry points are installed: **`irctc-tui`** (the app) and
+**`irctc-recon`** (the selector verifier).
 
 ## Responsible use & disclaimer
 
