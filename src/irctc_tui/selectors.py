@@ -179,6 +179,17 @@ CLASS_CELL = [
     ".ng-star-inserted .link",
 ]
 
+# Per-class availability cells parsed by results.py (class code + status + fare).
+RESULT_CLASS_CELL = [
+    ".pre-avl",
+    ".avl-classes .pre-avl",
+    "td.class-type",
+    ".class-type",
+    ".AVAILABLE",
+    ".WL",
+    ".RAC",
+]
+
 # Availability text nodes inside a class' date column.
 AVAILABILITY_STATUS = [
     ".AVAILABLE",
