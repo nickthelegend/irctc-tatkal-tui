@@ -1,0 +1,46 @@
+{
+  "account": {
+    "username": "your_irctc_username",
+    "password": "",
+    "auto_login": true,
+    "reuse_session": false
+  },
+  "journey": {
+    "from_station": "SC",
+    "to_station": "TPTY",
+    "journey_date": "24-07-2026",
+    "travel_class": "SL",
+    "quota": "TATKAL",
+    "train_number": "",
+    "boarding_station": ""
+  },
+  "passengers": [
+    {
+      "name": "Passenger One",
+      "age": 28,
+      "gender": "Male",
+      "berth_preference": "Lower",
+      "food_preference": "No Food",
+      "nationality": "India",
+      "senior_citizen": false,
+      "opt_berth_only_if_confirmed": false
+    }
+  ],
+  "timing": {
+    "check_interval_seconds": 15.0,
+    "jitter_seconds": 3.0,
+    "start_time": "11:00:00",
+    "max_attempts": 0,
+    "retry_on_error": true
+  },
+  "behavior": {
+    "auto_book_when_available": true,
+    "stop_before_payment": true,
+    "upi_id": "",
+    "contact_mobile": "",
+    "save_screenshots": true,
+    "headed": true,
+    "slow_mo_ms": 0,
+    "browser": "chromium"
+  }
+}
