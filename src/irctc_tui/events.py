@@ -15,6 +15,7 @@ class Phase(str, Enum):
     """Coarse state of the booking run — drives the status line in the TUI."""
 
     IDLE = "Idle"
+    PREFLIGHT = "Pre-flight check"
     LAUNCHING = "Launching browser"
     LOGIN = "Waiting for login"
     WAITING_START = "Waiting for start time"

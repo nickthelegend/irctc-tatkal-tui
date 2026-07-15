@@ -71,6 +71,32 @@ _EXTRACT_JS = r"""
 """
 
 
+async def discover_controls(page) -> dict:
+    """Return the raw discovery dict (inputs, p-* widgets, buttons) for ``page``."""
+    return await page.evaluate(_EXTRACT_JS)
+
+
+async def verify_selectors(page) -> list[tuple[str, list[tuple[str, int]], bool]]:
+    """For each logical group, test every candidate against ``page``.
+
+    Returns a list of ``(group_name, [(selector, match_count), ...], any_matched)``.
+    """
+    results: list[tuple[str, list[tuple[str, int]], bool]] = []
+    for name, candidates in _GROUPS.items():
+        hits: list[tuple[str, int]] = []
+        any_hit = False
+        for sel in candidates:
+            try:
+                count = await page.locator(sel).count()
+            except Exception:  # noqa: BLE001 - malformed selector shouldn't abort the sweep
+                count = 0
+            hits.append((sel, count))
+            if count:
+                any_hit = True
+        results.append((name, hits, any_hit))
+    return results
+
+
 async def _run(url: str, headed: bool, timeout_ms: int, json_path: str | None) -> int:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
@@ -98,9 +124,9 @@ async def _run(url: str, headed: bool, timeout_ms: int, json_path: str | None) -
                 continue
         await page.wait_for_timeout(2_500)
 
-        data = await page.evaluate(_EXTRACT_JS)
+        data = await discover_controls(page)
         _print_discovery(data)
-        await _print_verification(page)
+        _print_verification(await verify_selectors(page))
 
         if json_path:
             with open(json_path, "w", encoding="utf-8") as fh:
@@ -130,21 +156,12 @@ def _print_discovery(data: dict) -> None:
     print("\nbuttons:", ", ".join(data.get("buttons") or []))
 
 
-async def _print_verification(page) -> None:
+def _print_verification(results: list[tuple[str, list[tuple[str, int]], bool]]) -> None:
     print("\n=== Selector verification (✓ = matches live page) ===")
-    for name, candidates in _GROUPS.items():
+    for name, hits, any_hit in results:
         print(f"\n{name}:")
-        any_hit = False
-        for sel in candidates:
-            try:
-                count = await page.locator(sel).count()
-            except Exception as exc:  # noqa: BLE001
-                print(f"  ?? {sel}   (invalid: {exc})")
-                continue
-            mark = "✓" if count else "✗"
-            if count:
-                any_hit = True
-            print(f"  {mark} [{count}] {sel}")
+        for sel, count in hits:
+            print(f"  {'✓' if count else '✗'} [{count}] {sel}")
         if not any_hit:
             print("  ⚠ NONE matched — update this group in selectors.py")
 
