@@ -148,6 +148,30 @@ def test_from_to_are_dropdowns_with_station_values(tmp_path):
     _run(scenario())
 
 
+def test_results_table_populates_from_event(tmp_path):
+    from irctc_tui.events import BotEvent
+
+    async def scenario():
+        app = IRCTCApp(config_path=tmp_path / "config.json")
+        async with app.run_test():
+            trains = [
+                {"name": "NARAYANADRI EXPRESS", "number": "12734", "departure": "20:00",
+                 "arrival": "06:30", "classes": [
+                     {"class_code": "SL", "status_raw": "AVAILABLE-0021",
+                      "availability": "AVAILABLE", "fare": "₹385", "bookable": True}]},
+                {"name": "PADMAVATI EXPRESS", "number": "12764", "departure": "18:25",
+                 "arrival": "05:10", "classes": [
+                     {"class_code": "SL", "status_raw": "WL 45",
+                      "availability": "WAITLIST", "fare": "₹385", "bookable": False}]},
+            ]
+            await app._on_bot_event(BotEvent(kind="results",
+                                             data={"trains": trains, "target_class": "SL"}))
+            table = app.query_one("#results_table", DataTable)
+            assert table.row_count == 2
+
+    _run(scenario())
+
+
 def test_telegram_commands_dispatch_safely(tmp_path):
     async def scenario():
         app = IRCTCApp(config_path=tmp_path / "config.json")

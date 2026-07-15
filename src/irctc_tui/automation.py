@@ -39,6 +39,7 @@ from playwright.async_api import TimeoutError as PWTimeout
 from . import selectors as S
 from .config import AppConfig
 from .events import BotEvent, Level, Phase
+from .results import parse_results, pick_target
 
 EventSink = Callable[[BotEvent], Awaitable[None] | None]
 
@@ -499,43 +500,39 @@ class IRCTCBot:
     # ------------------------------------------------------------------ #
 
     async def _read_target_availability(self):
-        """Return ``(Availability, raw_text, train_label)`` for the target class.
+        """Parse every train, broadcast the results, and return the target's status.
 
-        Best-effort: IRCTC's results DOM is intricate and version-dependent. If we
-        can't confidently parse, we return UNKNOWN and let the poll loop retry (or
-        the user take over in the visible browser).
+        Returns ``(Availability, raw_text, train_label)`` for the class/train the
+        booker should act on (see :func:`~irctc_tui.results.pick_target`).
         """
         assert self.page is not None
         j = self.config.journey
-        cards = self.page.locator(_join(S.TRAIN_CARD))
-        count = await cards.count()
-        if count == 0:
+
+        # On live IRCTC, a class' availability only renders once its cell is
+        # clicked. Best-effort click the target class on each visible card so the
+        # parser can read it. On pages that show it inline this is a no-op.
+        try:
+            cards = self.page.locator(_join(S.TRAIN_CARD))
+            for i in range(min(await cards.count(), 8)):
+                await self._click_class_in_card(cards.nth(i), j.travel_class)
+        except Exception:  # noqa: BLE001
+            pass
+
+        trains = await parse_results(self.page)
+        await self._emit(
+            BotEvent(
+                kind="results",
+                message=f"Parsed {len(trains)} train(s).",
+                phase=Phase.POLLING,
+                data={"trains": [t.to_dict() for t in trains], "target_class": j.travel_class},
+            )
+        )
+
+        chosen = pick_target(trains, j.travel_class, j.train_number)
+        if chosen is None:
             return S.classify_availability(""), "", ""
-
-        target_indices = range(count)
-        train_label = ""
-        # If a specific train number is set, narrow to the matching card.
-        if j.train_number.strip():
-            for i in range(count):
-                text = (await cards.nth(i).inner_text()) or ""
-                if j.train_number.strip() in text:
-                    target_indices = [i]
-                    train_label = j.train_number.strip()
-                    break
-
-        for i in target_indices:
-            card = cards.nth(i)
-            # Click the class box matching the desired class code.
-            clicked = await self._click_class_in_card(card, j.travel_class)
-            if not clicked:
-                continue
-            await asyncio.sleep(1.2)
-            raw = await self._read_first_availability(card)
-            status = S.classify_availability(raw)
-            label = train_label or await self._train_label_of(card)
-            if status is not S.Availability.UNKNOWN:
-                return status, raw, label
-        return S.classify_availability(""), "", train_label
+        train, ca = chosen
+        return ca.availability, ca.status_raw or ca.availability.value, train.label()
 
     async def _click_class_in_card(self, card: Locator, class_code: str) -> bool:
         cells = card.locator(_join(S.CLASS_CELL))
@@ -551,25 +548,6 @@ class IRCTCBot:
                 except Exception:  # noqa: BLE001
                     return False
         return False
-
-    async def _read_first_availability(self, card: Locator) -> str:
-        for sel in S.AVAILABILITY_STATUS:
-            loc = card.locator(sel).first
-            try:
-                if await loc.count() > 0:
-                    txt = (await loc.inner_text()).strip()
-                    if txt:
-                        return txt
-            except Exception:  # noqa: BLE001
-                continue
-        return ""
-
-    async def _train_label_of(self, card: Locator) -> str:
-        try:
-            text = (await card.inner_text()) or ""
-            return text.strip().splitlines()[0][:60]
-        except Exception:  # noqa: BLE001
-            return ""
 
     # ------------------------------------------------------------------ #
     # Low-level locator helpers

@@ -273,6 +273,8 @@ class IRCTCApp(App):
                 yield Button("✓ Validate", id="validate")
                 yield Button("🔔 Test alarm", id="test_alarm")
                 yield Button("✕ Close browser", id="close_browser")
+            yield Static("🚆 Trains found (updates each check)", classes="section-title")
+            yield DataTable(id="results_table", cursor_type="row")
             yield RichLog(id="log", highlight=True, markup=True, wrap=True)
 
     # ------------------------------------------------------------------ #
@@ -283,6 +285,9 @@ class IRCTCApp(App):
         table = self.query_one("#passenger_table", DataTable)
         table.add_columns("Name", "Age", "Gender", "Berth", "Food")
         self._rebuild_passenger_table()
+        self.query_one("#results_table", DataTable).add_columns(
+            "Train", "No.", "Dep", "Arr", "Availability"
+        )
         self._log_line("Welcome. Fill the tabs, then press Start (Ctrl+R).", Level.INFO)
         self._log_line(
             "Reminder: you solve the CAPTCHA, login, and payment in the browser.",
@@ -724,6 +729,8 @@ class IRCTCApp(App):
             self._safe_update("#status_avail", f"Availability: {raw}")
         if event.kind == "countdown":
             self._safe_update("#status_countdown", f"Next: {event.message}")
+        if event.kind == "results":
+            self._update_results_table(data.get("trains", []), data.get("target_class", ""))
         if event.phase in _ALARM_PHASES:
             # Make sure the user sees these prominently in the log too.
             if event.kind == "phase":
@@ -750,6 +757,29 @@ class IRCTCApp(App):
             self.query_one(selector, Static).update(text)
         except Exception:  # noqa: BLE001
             pass
+
+    def _update_results_table(self, trains: list[dict], target_class: str) -> None:
+        try:
+            table = self.query_one("#results_table", DataTable)
+        except Exception:  # noqa: BLE001
+            return
+        table.clear()
+        tc = (target_class or "").upper()
+        for t in trains:
+            classes = t.get("classes", [])
+            target = next((c for c in classes if c.get("class_code") == tc), None)
+            mark = "✓ " if (target and target.get("bookable")) else ""
+            avail = "  ".join(
+                f"{c.get('class_code')}:{c.get('status_raw') or c.get('availability')}"
+                for c in classes
+            )
+            table.add_row(
+                f"{mark}{t.get('name', '')}".strip(),
+                t.get("number", ""),
+                t.get("departure", ""),
+                t.get("arrival", ""),
+                avail or "—",
+            )
 
     def _log_line(self, message: str, level: Level = Level.INFO) -> None:
         style = LEVEL_MARKUP.get(level, "white")

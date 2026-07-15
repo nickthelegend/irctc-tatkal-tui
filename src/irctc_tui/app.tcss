@@ -99,6 +99,12 @@ Switch {
     padding: 0 2 1 2;
 }
 
+#results_table {
+    height: 9;
+    margin: 0 2 1 2;
+    border: round $primary;
+}
+
 #log {
     height: 1fr;
     border: round $primary;

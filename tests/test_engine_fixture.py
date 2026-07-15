@@ -18,6 +18,7 @@ from irctc_tui.automation import IRCTCBot
 from irctc_tui.config import AppConfig, BehaviorConfig, JourneyConfig
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "irctc_search_mock.html").as_uri()
+RESULTS_FIXTURE = (Path(__file__).parent / "fixtures" / "irctc_results_mock.html").as_uri()
 
 
 def test_engine_fills_search_form_against_local_replica():
@@ -51,3 +52,34 @@ def test_engine_fills_search_form_against_local_replica():
     assert captured["quota"] == "TATKAL"         # opened the quota dropdown, chose Tatkal
     assert "SL" in captured["travelClass"]       # 'SL' → 'Sleeper' label match
     assert captured["searched"] is True          # clicked Search
+
+
+def test_engine_reads_results_and_picks_target():
+    config = AppConfig(
+        journey=JourneyConfig(
+            from_station="SC", to_station="TPTY", journey_date="24-07-2026",
+            travel_class="SL", quota="TATKAL",
+        ),
+        behavior=BehaviorConfig(headed=False, save_screenshots=False),
+    )
+    events = []
+
+    async def scenario():
+        bot = IRCTCBot(config, on_event=events.append)
+        try:
+            await bot._launch()
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"Playwright browser unavailable: {exc}")
+        try:
+            await bot.page.goto(RESULTS_FIXTURE)
+            return await bot._read_target_availability()
+        finally:
+            await bot.close()
+
+    status, raw, label = asyncio.run(scenario())
+
+    assert status.bookable                 # SL on 12734 is AVAILABLE
+    assert "AVAILABLE" in raw
+    assert "12734" in label                # picked NARAYANADRI EXPRESS
+    results = [e for e in events if e.kind == "results"]
+    assert results and len(results[-1].data["trains"]) == 3
