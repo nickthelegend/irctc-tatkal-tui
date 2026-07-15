@@ -172,18 +172,24 @@ the browser is left open for you to finish.
 
 On every check the tool parses the results page into structured data — one
 `Train` per service with its number, name, departure/arrival, and a
-`ClassAvailability` per class (status + fare):
+`ClassAvailability` for the searched class (status + fare). Real output from a
+live SC→Tirupati search (24-Jul-2026, General quota — everything waitlisted,
+which is exactly why you'd need Tatkal):
 
 ```
-✓ NARAYANADRI EXPRESS  12734  20:00  06:30  SL:AVAILABLE-0021  3A:RAC 5  2A:GNWL 34
-  PADMAVATI EXPRESS     12764  18:25  05:10  SL:GNWL 88/WL45    3A:AVAILABLE-0008
-  SESHADRI EXPRESS      17209  21:45  09:15  SL:REGRET/WL       2S:AVAILABLE-0102
+KRISHNA EXPRESS  17406  05:55  21:40  SL:WL30    (3A)      ₹415
+RXL TPTY EXP     17434  19:05  09:30  SL:REGRET  (3A 2A)   ₹415
 ```
 
-This table updates live on the **Run** tab, and drives the booking decision: the
+This table updates live on the **Run** tab and drives the booking decision: the
 tool picks the first train whose target class is **bookable** (`AVAILABLE`/`RAC`),
-or the specific `train_number` you set. The parser is **text-based** (regex over
-each card's text) so it survives IRCTC's frequent DOM changes — see
+or the specific `train_number` you set.
+
+The parser is **verified against the real IRCTC DOM** — availability is read from
+the date-wise cells (`Fri, 24 Jul` + a `WL`/`RAC`/`AVAILABLE`/`REGRET` status),
+the class from the active tab, and the fare from `₹ …`. It's tested against
+[`tests/fixtures/irctc_results_real.html`](tests/fixtures/irctc_results_real.html),
+which is **actual captured IRCTC markup**, not a mock. See
 [`results.py`](src/irctc_tui/results.py).
 
 ## Configuration reference
@@ -350,7 +356,7 @@ tests/              # config, selectors, alarm, notify, recon, and TUI tests
 
 ```bash
 uv pip install -e ".[dev]"
-pytest            # 59 tests (incl. browser integration against local fixtures)
+pytest            # 61 tests (incl. parser vs REAL captured IRCTC HTML)
 ruff check src/   # lint
 ```
 
