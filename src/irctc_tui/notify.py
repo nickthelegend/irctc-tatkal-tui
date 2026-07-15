@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -62,6 +63,68 @@ class TelegramNotifier:
         if not self.enabled:
             return False, "disabled"
         return await asyncio.to_thread(self._send_sync, text)
+
+    # -- polling (two-way remote control) -------------------------------- #
+
+    def _get_updates_sync(self, offset: int | None, timeout: int) -> list[dict]:
+        params: dict = {"timeout": timeout, "allowed_updates": '["message"]'}
+        if offset is not None:
+            params["offset"] = offset
+        url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates?" + urllib.parse.urlencode(params)
+        try:
+            with urllib.request.urlopen(url, timeout=timeout + 15) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001 - polling must never crash the caller
+            return []
+        return data.get("result", []) if data.get("ok") else []
+
+    async def get_updates(self, offset: int | None = None, timeout: int = 0) -> list[dict]:
+        """Fetch new updates. ``offset`` acknowledges everything before it."""
+        if not self.enabled:
+            return []
+        return await asyncio.to_thread(self._get_updates_sync, offset, timeout)
+
+    # -- photo (send a browser screenshot to the owner) ------------------ #
+
+    def _send_photo_sync(self, path: str, caption: str = "") -> tuple[bool, str]:
+        try:
+            with open(path, "rb") as fh:
+                img = fh.read()
+        except OSError as exc:
+            return False, f"cannot read {path}: {exc}"
+        boundary = "----IRCTCTUIboundaryZ7xQ2aB"
+        parts: list[bytes] = []
+
+        def field(name: str, value: str) -> None:
+            parts.append(
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+            )
+
+        field("chat_id", self.owner_id)
+        if caption:
+            field("caption", caption)
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; '
+            f'filename="{os.path.basename(path)}"\r\nContent-Type: image/png\r\n\r\n'.encode()
+        )
+        parts.append(img)
+        parts.append(f"\r\n--{boundary}--\r\n".encode())
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{self.bot_token}/sendPhoto",
+            data=b"".join(parts),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)
+        return bool(data.get("ok")), "" if data.get("ok") else str(data)
+
+    async def send_photo(self, path: str, caption: str = "") -> tuple[bool, str]:
+        if not self.enabled:
+            return False, "disabled"
+        return await asyncio.to_thread(self._send_photo_sync, path, caption)
 
 
 def from_config(telegram_cfg) -> TelegramNotifier:

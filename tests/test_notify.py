@@ -67,3 +67,26 @@ def test_send_sync_handles_network_exception(monkeypatch):
     ok, detail = TelegramNotifier("TOKEN", "42", enabled=True)._send_sync("x")
     assert ok is False
     assert "no route to host" in detail
+
+
+def test_get_updates_parses_results(monkeypatch):
+    def fake_urlopen(url, timeout=0):
+        return _FakeResp(b'{"ok": true, "result": [{"update_id": 5, "message": {"text": "status"}}]}')
+
+    monkeypatch.setattr(notify.urllib.request, "urlopen", fake_urlopen)
+    updates = TelegramNotifier("TOK", "42", enabled=True)._get_updates_sync(None, 0)
+    assert len(updates) == 1
+    assert updates[0]["update_id"] == 5
+    assert updates[0]["message"]["text"] == "status"
+
+
+def test_get_updates_disabled_returns_empty():
+    assert asyncio.run(TelegramNotifier("", "").get_updates()) == []
+
+
+def test_get_updates_swallows_errors(monkeypatch):
+    def boom(url, timeout=0):
+        raise OSError("down")
+
+    monkeypatch.setattr(notify.urllib.request, "urlopen", boom)
+    assert TelegramNotifier("TOK", "42", enabled=True)._get_updates_sync(3, 0) == []
