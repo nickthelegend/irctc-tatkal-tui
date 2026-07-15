@@ -57,8 +57,11 @@ bookings.
 - **🔎 Live selector verifier** — a **Pre-flight** button (and `irctc-recon` CLI)
   inspects the real IRCTC DOM and shows exactly which selectors still match, so
   you can confirm everything's wired the morning of your booking.
-- **📲 Telegram alerts** — configure a bot token + your owner id and get pinged
-  when a seat is found, when it's time to pay, or if something errors.
+- **📲 Two-way Telegram bot** — get pinged when a seat is found or it's time to
+  pay, **and control the run from your phone**: reply `status`, `run`, `stop`,
+  `silence`, or `shot` (sends a live browser screenshot) to the bot.
+- **⬇️ Station dropdowns** — pick From/To from a curated list (type to jump); no
+  more mistyped station codes.
 - **Config saved to disk** (git-ignored) so you never re-type your journey.
 - **All selectors centralized** in one file — trivial to fix when IRCTC changes
   its DOM.
@@ -117,7 +120,7 @@ python -m irctc_tui       # equivalent module form
 
 | Tab | What you set |
 | --- | --- |
-| **Journey** | From/To station codes, journey date (DD-MM-YYYY), class, quota, optional target train number. |
+| **Journey** | From/To station **dropdowns** (type to jump), journey date (DD-MM-YYYY), class, quota, optional target train number. |
 | **Passengers** | Add/remove travellers — name, age, gender, berth & food preference. |
 | **Account** | IRCTC username, optional password, auto-login and session-reuse toggles. |
 | **Timing** | Poll interval, jitter, scheduled start time, max attempts, retry-on-error. |
@@ -187,7 +190,7 @@ The TUI reads and writes `./config.json`. You can also hand-edit it. See
 
 | Field | Meaning |
 | --- | --- |
-| `journey.from_station` / `to_station` | What to type into the station autocomplete. **Station codes are most reliable** (`SC`=Secunderabad, `HYB`=Hyderabad Deccan, `KCG`=Kacheguda, `TPTY`=Tirupati). |
+| `journey.from_station` / `to_station` | Station **code** (picked from the dropdown), typed into IRCTC's autocomplete — `SC`=Secunderabad, `HYB`=Hyderabad Deccan, `KCG`=Kacheguda, `TPTY`=Tirupati. Add more in [`stations.py`](src/irctc_tui/stations.py). |
 | `journey.journey_date` | `DD-MM-YYYY`. |
 | `journey.quota` | `TATKAL`, `PREMIUM TATKAL`, `GENERAL`, … |
 | `journey.train_number` | Lock onto one train (e.g. `12734`). Blank = first train with the class available. |
@@ -269,6 +272,24 @@ token is stored in your **git-ignored** `config.json` — treat it like a passwo
 
 <p align="center"><img src="docs/tui-telegram.svg" alt="Telegram tab" width="720"></p>
 
+### Control it from your phone (two-way)
+
+Once alerts are on, the bot also **listens for commands** — reply to it in the
+chat and it acts on your run. Only messages from your `owner_id` are obeyed.
+
+| Send | It does |
+| --- | --- |
+| `status` | Replies with the current phase, attempts, and login state. |
+| `run` | Starts the booking run (validates config first). |
+| `stop` | Stops the run gracefully. |
+| `silence` | Silences the alarm. |
+| `shot` | Sends a **screenshot of the live browser** back to your chat. |
+| `help` | Lists the commands. (`/start` shows help too.) |
+
+Remote control comes online when you press **📤 Test Telegram**, when a run
+starts, or at launch if Telegram is already configured. It's polled every few
+seconds, so commands act within moments.
+
 ## When IRCTC changes its DOM (troubleshooting)
 
 IRCTC's Angular site changes often. If a step stops working:
@@ -295,7 +316,8 @@ src/irctc_tui/
 ├── recon.py        # live DOM inspector + selector verifier (irctc-recon)
 ├── preflight.py    # in-app pre-flight selector check (streams to the Run log)
 ├── alarm.py        # cross-platform looping completion alarm
-├── notify.py       # Telegram owner alerts (stdlib urllib)
+├── notify.py       # Telegram alerts + two-way command polling (stdlib urllib)
+├── stations.py     # curated station list for the From/To dropdowns
 ├── config.py       # dataclasses + JSON load/save/validate
 ├── events.py       # BotEvent/Phase/Level passed to the UI
 └── cli.py          # entry point
@@ -306,7 +328,7 @@ tests/              # config, selectors, alarm, notify, recon, and TUI tests
 
 ```bash
 uv pip install -e ".[dev]"
-pytest            # 37 tests; TUI/notify tests need no browser or network
+pytest            # 46 tests; TUI/notify tests need no browser or network
 ruff check src/   # lint
 ```
 
