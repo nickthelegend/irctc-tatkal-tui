@@ -54,9 +54,11 @@ bookings.
 - **🔔 Completion alarm** — when a seat is found / the payment hand-off is
   reached, it **rings a looping alarm until you silence it**, so you can walk
   away and be called back. Bring your own `.wav`/`.mp3` or use the built-in tune.
-- **🔎 Live selector verifier** (`irctc-recon`) — inspect the real IRCTC DOM and
-  see exactly which selectors still match, so you can keep the tool working when
-  the site changes.
+- **🔎 Live selector verifier** — a **Pre-flight** button (and `irctc-recon` CLI)
+  inspects the real IRCTC DOM and shows exactly which selectors still match, so
+  you can confirm everything's wired the morning of your booking.
+- **📲 Telegram alerts** — configure a bot token + your owner id and get pinged
+  when a seat is found, when it's time to pay, or if something errors.
 - **Config saved to disk** (git-ignored) so you never re-type your journey.
 - **All selectors centralized** in one file — trivial to fix when IRCTC changes
   its DOM.
@@ -108,6 +110,7 @@ python -m irctc_tui       # equivalent module form
 | `Ctrl+R` | Start booking run |
 | `Ctrl+T` | Stop (graceful) |
 | `Ctrl+G` | Silence the alarm |
+| `F2` | Pre-flight selector check |
 | `Ctrl+Q` | Quit (closes the browser) |
 
 ## The tabs
@@ -119,7 +122,8 @@ python -m irctc_tui       # equivalent module form
 | **Account** | IRCTC username, optional password, auto-login and session-reuse toggles. |
 | **Timing** | Poll interval, jitter, scheduled start time, max attempts, retry-on-error. |
 | **Browser** | Auto-book toggle, headed/headless, browser engine, slow-mo, screenshots, contact mobile, UPI id (shown only), **alarm-on-success toggle + custom alarm sound**. |
-| **Run** | Live status (phase, attempts, availability, next-check countdown), Start/Stop, **🔔 Test alarm / 🔕 Silence**, and a colour-coded event log. |
+| **Telegram** | Enable alerts, **bot token**, **owner id**, and a **📤 Test Telegram** button. |
+| **Run** | Live status (phase, attempts, availability, next-check countdown), Start/Stop, **🔎 Pre-flight**, **🔔 Test alarm / 🔕 Silence**, and a colour-coded event log. |
 
 <p align="center">
   <img src="docs/tui-journey.svg" alt="Journey tab" width="420">
@@ -145,12 +149,12 @@ wait until start time (if set)      e.g. hold until 11:00:00
 │  POLL LOOP (every X seconds) │
 │  fill search → read status   │◄─── not available? sleep, retry
 └──────────────┬──────────────┘
-        │ available / RAC   ──►  🔔 ALARM STARTS (rings until you silence it)
-        ▼
+        │ available / RAC   ──►  🔔 ALARM + 📲 Telegram alert (alarm rings until
+        ▼                        you silence it)
 click Book Now → fill all passengers
         │
         ▼
-reach review / payment  ──►  ⏸  YOU solve the CAPTCHA + pay
+reach review / payment  ──►  ⏸  YOU solve the CAPTCHA + pay   (+📲 "come pay")
                                (headed browser stays open — the alarm keeps
                                 ringing so you know to come pay)
 ```
@@ -176,7 +180,8 @@ The TUI reads and writes `./config.json`. You can also hand-edit it. See
   "behavior": { "auto_book_when_available": true, "stop_before_payment": true,
                 "upi_id": "", "contact_mobile": "", "save_screenshots": true,
                 "alarm_on_success": true, "alarm_sound_path": "",
-                "headed": true, "slow_mo_ms": 0, "browser": "chromium" }
+                "headed": true, "slow_mo_ms": 0, "browser": "chromium" },
+  "telegram": { "enabled": false, "bot_token": "", "owner_id": "" }
 }
 ```
 
@@ -193,6 +198,9 @@ The TUI reads and writes `./config.json`. You can also hand-edit it. See
 | `behavior.alarm_on_success` | Ring a looping alarm when a seat is found / payment hand-off is reached. |
 | `behavior.alarm_sound_path` | Path to your own `.wav`/`.mp3`. Blank = a built-in tune synthesised on first use. |
 | `behavior.headed` | Headed browser (default). Headless is offered for dry-runs but IRCTC blocks it. |
+| `telegram.enabled` | Turn on Telegram alerts to your chat. |
+| `telegram.bot_token` | Bot token from **@BotFather**. Secret — stored in the git-ignored config. |
+| `telegram.owner_id` | Your numeric chat id (from **@userinfobot**). |
 
 > Your `config.json` may contain your IRCTC username/password in plaintext. It is
 > **git-ignored**. Leave `password` blank to type it in the browser instead.
@@ -221,11 +229,16 @@ Run tab or **Ctrl+G**. Walk away and let it call you back.
 - Playback uses your OS player (`afplay` on macOS, `paplay`/`aplay`/`ffplay`/
   `mpg123` on Linux, `winsound` on Windows), falling back to the terminal bell.
 
-## 🔎 Verify selectors against the live site (`irctc-recon`)
+## 🔎 Pre-flight check & selector verifier
 
-IRCTC's DOM shifts between releases. Instead of guessing, point the built-in
-recon tool at the real site — it opens the search page, lists every form control
-it finds, and prints a ✓/✗ report of which `selectors.py` candidates still match:
+IRCTC's DOM shifts between releases, so verify before you rely on it — two ways:
+
+**In the app:** press **🔎 Pre-flight** on the Run tab (or **F2**). It opens the
+live search page in the browser and streams a ✓/✗ line per selector group into
+the Run log, ending with `Pre-flight done: N/M selector groups matched`. Run it
+the morning of your booking to confirm everything's wired — without leaving the TUI.
+
+**From the CLI:** `irctc-recon` also lists every control it discovers:
 
 ```bash
 irctc-recon                 # headless; verify selectors + list controls
@@ -234,9 +247,27 @@ irctc-recon --json dom.json # also dump the discovered controls to JSON
 python -m irctc_tui.recon   # equivalent module form
 ```
 
-Read the `⚠ NONE matched` / `✗` lines, then update that group in
+Read the `✗` / `⚠ NONE matched` lines, then update that group in
 [`src/irctc_tui/selectors.py`](src/irctc_tui/selectors.py). Run it from a network
-that can reach IRCTC (some sandboxes/proxies block it).
+that can reach IRCTC (some sandboxes/proxies/VPNs block it).
+
+## 📲 Telegram alerts
+
+Get pinged on your phone the instant a seat is found or it's time to pay — handy
+when the alarm is at your desk but you aren't.
+
+1. Message **[@BotFather](https://t.me/BotFather)** → `/newbot` → copy the **bot
+   token**.
+2. Message **[@userinfobot](https://t.me/userinfobot)** → copy your numeric
+   **owner id** (start a chat with your new bot first so it can message you).
+3. In the **Telegram** tab: turn on *Enabled*, paste the token and owner id, and
+   press **📤 Test Telegram** — you should get a test message.
+
+Alerts fire (once each) on: run start, **seat available**, **payment hand-off**,
+done, stop, error, and any "action needed" moment (e.g. login required). The bot
+token is stored in your **git-ignored** `config.json` — treat it like a password.
+
+<p align="center"><img src="docs/tui-telegram.svg" alt="Telegram tab" width="720"></p>
 
 ## When IRCTC changes its DOM (troubleshooting)
 
@@ -262,18 +293,20 @@ src/irctc_tui/
 ├── automation.py   # Playwright engine: search, poll, book, hand off
 ├── selectors.py    # ALL IRCTC selectors + availability parsing  ← edit when DOM changes
 ├── recon.py        # live DOM inspector + selector verifier (irctc-recon)
+├── preflight.py    # in-app pre-flight selector check (streams to the Run log)
 ├── alarm.py        # cross-platform looping completion alarm
+├── notify.py       # Telegram owner alerts (stdlib urllib)
 ├── config.py       # dataclasses + JSON load/save/validate
 ├── events.py       # BotEvent/Phase/Level passed to the UI
 └── cli.py          # entry point
-tests/              # config, selectors, alarm, and headless TUI tests
+tests/              # config, selectors, alarm, notify, recon, and TUI tests
 ```
 
 ## Development
 
 ```bash
 uv pip install -e ".[dev]"
-pytest            # 28 tests; TUI tests use Textual's pilot — no browser needed
+pytest            # 37 tests; TUI/notify tests need no browser or network
 ruff check src/   # lint
 ```
 
