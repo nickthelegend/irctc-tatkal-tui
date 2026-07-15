@@ -769,16 +769,19 @@ class IRCTCApp(App):
             classes = t.get("classes", [])
             target = next((c for c in classes if c.get("class_code") == tc), None)
             mark = "✓ " if (target and target.get("bookable")) else ""
-            avail = "  ".join(
-                f"{c.get('class_code')}:{c.get('status_raw') or c.get('availability')}"
-                for c in classes
-            )
+            # Show classes whose availability is loaded (have a status); list any
+            # other offered class codes bare so you can see what the train runs.
+            loaded = [c for c in classes if c.get("status_raw")]
+            offered = [c["class_code"] for c in classes if not c.get("status_raw")]
+            parts = [f"{c['class_code']}:{c['status_raw']}" for c in loaded]
+            if offered:
+                parts.append("(" + " ".join(offered) + ")")
             table.add_row(
                 f"{mark}{t.get('name', '')}".strip(),
                 t.get("number", ""),
                 t.get("departure", ""),
                 t.get("arrival", ""),
-                avail or "—",
+                "  ".join(parts) or "—",
             )
 
     def _log_line(self, message: str, level: Level = Level.INFO) -> None:

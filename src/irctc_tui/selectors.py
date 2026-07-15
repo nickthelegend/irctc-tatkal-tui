@@ -179,16 +179,26 @@ CLASS_CELL = [
     ".ng-star-inserted .link",
 ]
 
-# Per-class availability cells parsed by results.py (class code + status + fare).
-RESULT_CLASS_CELL = [
-    ".pre-avl",
-    ".avl-classes .pre-avl",
-    "td.class-type",
-    ".class-type",
-    ".AVAILABLE",
-    ".WL",
-    ".RAC",
+# --- Results parsing (verified against the live IRCTC DOM, SC→TPTY 24-Jul-2026) ---
+# Train name + number, e.g. "KRISHNA EXPRESS (17406)".
+TRAIN_HEADING = [".train-heading strong", ".train-heading", "app-train-avl-enq strong"]
+# Departure / arrival time nodes (NOT the duration in .line-hr). ".time" matches
+# both the span.time (departure) and strong.time (arrival), incl. mobile copies.
+TRAIN_TIME = [".time"]
+# The currently selected (clicked) class tab, e.g. "Sleeper (SL)".
+ACTIVE_CLASS_TAB = [
+    ".ui-state-active .hidden-xs",
+    "p-tabmenu .ui-state-active .ui-menuitem-text",
+    ".ui-state-active .ui-menuitem-text",
 ]
+# Every class tab a train offers, e.g. "Sleeper (SL)", "AC 3 Tier (3A)".
+ALL_CLASS_TABS = [".ui-tabmenuitem .hidden-xs", "p-tabmenu li .ui-menuitem-text"]
+# Date-wise availability cells: each holds a date <strong> and a status div
+# whose CLASS is WL / RAC / AVAILABLE / REGRET and whose text is e.g. "WL30".
+AVAIL_DATE_CELL = ["td.link .pre-avl", "table .pre-avl", ".pre-avl"]
+
+# Legacy alias kept for any external references.
+RESULT_CLASS_CELL = AVAIL_DATE_CELL
 
 # Availability text nodes inside a class' date column.
 AVAILABILITY_STATUS = [

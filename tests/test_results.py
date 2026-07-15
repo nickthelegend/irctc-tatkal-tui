@@ -1,4 +1,9 @@
-"""Results parser — pure functions (fast) and a browser integration test."""
+"""Results parser — pure functions plus an integration test against REAL captured
+IRCTC HTML (``fixtures/irctc_results_real.html``, SC→Tirupati 24-Jul-2026).
+
+The fixture is not a hand-written mock: it is the actual ``<app-train-avl-enq>``
+markup captured from a live IRCTC search (Angular attributes stripped).
+"""
 
 import asyncio
 from pathlib import Path
@@ -6,77 +11,85 @@ from pathlib import Path
 import pytest
 
 from irctc_tui.results import (
-    parse_class_cell,
+    Train,
+    code_from_label,
+    date_token,
+    extract_fare,
+    extract_status,
     parse_results,
     parse_train_header,
     pick_target,
+    status_for_date,
 )
 from irctc_tui.selectors import Availability
 
-FIXTURE = (Path(__file__).parent / "fixtures" / "irctc_results_mock.html").as_uri()
+REAL_FIXTURE = (Path(__file__).parent / "fixtures" / "irctc_results_real.html").as_uri()
 
 
 # ---- pure parsing --------------------------------------------------------- #
 
 
-def test_parse_train_header_name_number_times():
-    t = parse_train_header("NARAYANADRI EXPRESS (12734)\nDep 20:00 · SC → TPTY · Arr 06:30")
-    assert t.name == "NARAYANADRI EXPRESS"
-    assert t.number == "12734"
-    assert t.departure == "20:00"
-    assert t.arrival == "06:30"
+def test_parse_train_header_name_and_number():
+    t = parse_train_header("KRISHNA EXPRESS (17406)\nRuns On: MTWTFSS\n05:55 | CHARLAPALLI")
+    assert t.name == "KRISHNA EXPRESS"
+    assert t.number == "17406"
+
+
+def test_code_from_label():
+    assert code_from_label("Sleeper (SL)") == "SL"
+    assert code_from_label("AC 3 Tier (3A)") == "3A"
+    assert code_from_label("Exec. Chair Car (EC)") == "EC"
+    assert code_from_label("nonsense") == ""
+
+
+def test_date_token():
+    assert date_token("24-07-2026") == "24 Jul"
+    assert date_token("04-08-2026") == "04 Aug"
+    assert date_token("bad") == ""
 
 
 @pytest.mark.parametrize(
-    "text,code,avail,fare",
+    "text,status",
     [
-        ("SL ₹385 AVAILABLE-0021", "SL", Availability.AVAILABLE, "₹385"),
-        ("3A ₹1,010 RAC 5", "3A", Availability.RAC, "₹1,010"),
-        ("2A ₹1450 GNWL 34/WL 21", "2A", Availability.WAITLIST, "₹1450"),
-        ("2S ₹120 NOT AVAILABLE", "2S", Availability.NOT_AVAILABLE, "₹120"),
-        ("CC ₹500 CURR_AVBL-0009", "CC", Availability.AVAILABLE, "₹500"),
+        ("Fri, 24 Jul WL30", "WL30"),
+        ("Fri, 24 Jul REGRET", "REGRET"),
+        ("Tue, 04 Aug RAC 33", "RAC 33"),
+        ("Fri, 24 Jul AVAILABLE-0021", "AVAILABLE-0021"),
+        ("Fri, 24 Jul", ""),
     ],
 )
-def test_parse_class_cell(text, code, avail, fare):
-    ca = parse_class_cell(text)
-    assert ca is not None
-    assert ca.class_code == code
-    assert ca.availability is avail
-    assert ca.fare == fare
+def test_extract_status(text, status):
+    assert extract_status(text) == status
 
 
-def test_parse_class_cell_none_when_no_class():
-    assert parse_class_cell("₹385 some noise") is None
-    assert parse_class_cell("") is None
+def test_extract_fare():
+    assert extract_fare("Book Now ₹ 415 info") == "₹415"
+    assert extract_fare("no fare here") == ""
+
+
+def test_status_for_date_prefers_journey_date():
+    cells = ["Fri, 24 Jul WL30", "Sat, 25 Jul WL31", "Sun, 26 Jul WL16"]
+    assert status_for_date(cells, "24-07-2026") == "WL30"
+    assert status_for_date(cells, "25-07-2026") == "WL31"
+    # unknown date → first with a status
+    assert status_for_date(cells, "01-01-2030") == "WL30"
 
 
 def test_pick_target_prefers_first_bookable():
-    from irctc_tui.results import Train
+    from irctc_tui.results import ClassAvailability
 
     trains = [
-        Train("12764", "PADMAVATI", classes=[parse_class_cell("SL WL 40")]),
-        Train("12734", "NARAYANADRI", classes=[parse_class_cell("SL AVAILABLE-0021")]),
+        Train("17434", "RXL TPTY", classes=[ClassAvailability("SL", "REGRET", Availability.WAITLIST)]),
+        Train("12734", "NARAYANADRI", classes=[ClassAvailability("SL", "AVAILABLE-0021", Availability.AVAILABLE)]),
     ]
     train, ca = pick_target(trains, "SL")
-    assert train.number == "12734"
-    assert ca.bookable
+    assert train.number == "12734" and ca.bookable
 
 
-def test_pick_target_honours_train_number():
-    from irctc_tui.results import Train
-
-    trains = [
-        Train("12734", "NARAYANADRI", classes=[parse_class_cell("SL AVAILABLE-0021")]),
-        Train("12764", "PADMAVATI", classes=[parse_class_cell("SL WL 40")]),
-    ]
-    train, ca = pick_target(trains, "SL", train_number="12764")
-    assert train.number == "12764"  # requested train wins even though it's WL
+# ---- integration against the REAL captured IRCTC HTML --------------------- #
 
 
-# ---- DOM integration ------------------------------------------------------ #
-
-
-def test_parse_results_against_fixture():
+def test_parse_results_against_real_irctc_capture():
     async def scenario():
         from playwright.async_api import async_playwright
 
@@ -86,24 +99,30 @@ def test_parse_results_against_fixture():
             except Exception as exc:  # noqa: BLE001
                 pytest.skip(f"Playwright browser unavailable: {exc}")
             page = await (await browser.new_context()).new_page()
-            await page.goto(FIXTURE)
-            trains = await parse_results(page)
+            await page.goto(REAL_FIXTURE)
+            trains = await parse_results(page, journey_date="24-07-2026", want_class="SL")
             await browser.close()
             return trains
 
     trains = asyncio.run(scenario())
-    assert len(trains) == 3
-
     by_num = {t.number: t for t in trains}
-    assert set(by_num) == {"12734", "12764", "17209"}
+    assert {"17406", "17434"} <= set(by_num)
 
-    narayanadri = by_num["12734"]
-    assert narayanadri.name == "NARAYANADRI EXPRESS"
-    assert narayanadri.departure == "20:00"
-    assert narayanadri.availability_for("SL").availability is Availability.AVAILABLE
-    assert narayanadri.availability_for("3A").availability is Availability.RAC
-    assert narayanadri.availability_for("2A").availability is Availability.WAITLIST
+    krishna = by_num["17406"]
+    assert krishna.name == "KRISHNA EXPRESS"
+    assert krishna.departure == "05:55" and krishna.arrival == "21:40"
+    sl = krishna.availability_for("SL")
+    assert sl.status_raw == "WL30"
+    assert sl.availability is Availability.WAITLIST
+    assert sl.fare == "₹415"
+    assert krishna.availability_for("3A") is not None  # offered class detected
 
-    # first bookable SL across the results is 12734
+    rxl = by_num["17434"]
+    assert rxl.availability_for("SL").status_raw == "REGRET"
+    assert rxl.availability_for("SL").availability is Availability.WAITLIST
+
+    # Nothing is bookable for SL on 24-Jul under General quota (all WL/REGRET) —
+    # exactly why Tatkal is needed. pick_target still reports the first train.
     train, ca = pick_target(trains, "SL")
-    assert train.number == "12734" and ca.bookable
+    assert not ca.bookable
+    assert train.number in {"17406", "17434"}

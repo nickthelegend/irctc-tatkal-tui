@@ -18,7 +18,7 @@ from irctc_tui.automation import IRCTCBot
 from irctc_tui.config import AppConfig, BehaviorConfig, JourneyConfig
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "irctc_search_mock.html").as_uri()
-RESULTS_FIXTURE = (Path(__file__).parent / "fixtures" / "irctc_results_mock.html").as_uri()
+RESULTS_FIXTURE = (Path(__file__).parent / "fixtures" / "irctc_results_real.html").as_uri()
 
 
 def test_engine_fills_search_form_against_local_replica():
@@ -78,8 +78,10 @@ def test_engine_reads_results_and_picks_target():
 
     status, raw, label = asyncio.run(scenario())
 
-    assert status.bookable                 # SL on 12734 is AVAILABLE
-    assert "AVAILABLE" in raw
-    assert "12734" in label                # picked NARAYANADRI EXPRESS
+    # Real capture: SC→TPTY 24-Jul General is fully waitlisted, so nothing is
+    # bookable — the engine still parses and reports the real status.
+    assert not status.bookable
+    assert raw in {"WL30", "REGRET"}
+    assert "1740" in label                 # 17406 or 17434
     results = [e for e in events if e.kind == "results"]
-    assert results and len(results[-1].data["trains"]) == 3
+    assert results and len(results[-1].data["trains"]) == 2

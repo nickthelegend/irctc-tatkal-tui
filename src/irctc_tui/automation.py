@@ -518,7 +518,7 @@ class IRCTCBot:
         except Exception:  # noqa: BLE001
             pass
 
-        trains = await parse_results(self.page)
+        trains = await parse_results(self.page, j.journey_date, j.travel_class)
         await self._emit(
             BotEvent(
                 kind="results",

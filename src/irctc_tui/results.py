@@ -1,13 +1,19 @@
 """Parse the IRCTC search-results page into structured trains + availability.
 
-IRCTC renders each train as an ``<app-train-avl-enq>`` card with a heading like
-``NARAYANADRI EXPRESS (12734)`` and a row of per-class cells showing the class
-code, fare, and availability (``AVAILABLE-0021``, ``RAC 5``, ``WL 12``, …).
+Verified against the **real** IRCTC DOM (SC→Tirupati, 24-Jul-2026). Each train is
+an ``<app-train-avl-enq>`` card with:
 
-The parser is deliberately **text-based**: instead of depending on fragile
-sub-selectors for every field, it reads each card's / cell's text and pulls out
-the pieces with regexes. That survives IRCTC's frequent DOM reshuffles far better
-than pinning exact element paths.
+* ``.train-heading strong`` → ``"KRISHNA EXPRESS (17406)"``
+* ``.time`` nodes → departure / arrival
+* a ``p-tabmenu`` of class tabs; the clicked one has ``.ui-state-active`` and
+  its ``.hidden-xs`` reads e.g. ``"Sleeper (SL)"``
+* date-wise availability cells (``td.link .pre-avl``), each a date ``<strong>``
+  plus a status div whose **class** is ``WL`` / ``RAC`` / ``AVAILABLE`` /
+  ``REGRET`` and whose text is e.g. ``"WL30"``, ``"RAC 33"``, ``"REGRET"``.
+
+Availability only appears once a class tab is clicked, so the engine clicks the
+target class first; this parser then reads the loaded (active) class' cells and
+matches the journey-date cell.
 """
 
 from __future__ import annotations
@@ -19,12 +25,14 @@ from typing import Any
 from . import selectors as S
 from .selectors import Availability, classify_availability
 
-# Class codes IRCTC uses, longest-first so e.g. "3E" wins before a bare "3".
 _CLASS_CODES = ["1A", "2A", "3A", "3E", "EC", "CC", "2S", "SL", "FC"]
+_MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-_NAME_NUM_RE = re.compile(r"(.+?)\s*\((\d{4,5})\)")
+_NAME_NUM_RE = re.compile(r"([A-Za-z][A-Za-z .&/-]*?)\s*\((\d{4,5})\)")
 _TIME_RE = re.compile(r"\b([0-2]?\d:[0-5]\d)\b")
 _FARE_RE = re.compile(r"(?:₹|RS\.?|INR)\s?([\d,]+)", re.IGNORECASE)
+_CODE_IN_PARENS_RE = re.compile(r"\((1A|2A|3A|3E|SL|CC|EC|2S|FC)\)")
 _STATUS_RE = re.compile(
     r"(CURR[_ ]?AVBL|AVAILABLE|AVBL|RAC|GNWL|RLWL|PQWL|RSWL|WL|REGRET"
     r"|NOT\s*AVAILABLE|TRAIN\s*DEPARTED|CHART\s*PREPARED|CANCELLED)[-\s]*(\d+)?",
@@ -93,7 +101,7 @@ class Train:
 
 
 def parse_train_header(text: str) -> Train:
-    """Pull name/number/times out of a train card's text."""
+    """Pull name/number (and best-effort times) from a train card's text."""
     flat = " ".join((text or "").split())
     m = _NAME_NUM_RE.search(flat)
     if m:
@@ -102,23 +110,61 @@ def parse_train_header(text: str) -> Train:
         name, number = (flat[:50] if flat else ""), ""
     times = _TIME_RE.findall(text or "")
     departure = times[0] if len(times) >= 1 else ""
-    arrival = times[1] if len(times) >= 2 else ""
+    # In IRCTC card text the order is dep, duration, arr — so arrival is the last.
+    arrival = times[-1] if len(times) >= 2 else ""
     return Train(number=number, name=name, departure=departure, arrival=arrival)
 
 
-def parse_class_cell(text: str) -> ClassAvailability | None:
-    """Parse one class cell's text into a :class:`ClassAvailability` (or None)."""
-    flat = " ".join((text or "").split())
-    if not flat:
-        return None
-    code = next((c for c in _CLASS_CODES if re.search(rf"(?<![A-Z0-9]){c}(?![A-Z0-9])", flat)), "")
-    if not code:
-        return None
-    status_match = _STATUS_RE.search(flat)
-    status_raw = " ".join(status_match.group(0).split()) if status_match else ""
-    fare_match = _FARE_RE.search(flat)
-    fare = f"₹{fare_match.group(1)}" if fare_match else ""
-    return ClassAvailability(code, status_raw, classify_availability(status_raw), fare)
+def code_from_label(label: str) -> str:
+    """"Sleeper (SL)" → "SL"; "AC 3 Tier (3A)" → "3A"."""
+    m = _CODE_IN_PARENS_RE.search(label or "")
+    if m:
+        return m.group(1)
+    up = (label or "").strip().upper()
+    return next((c for c in _CLASS_CODES if re.search(rf"(?<![A-Z0-9]){c}(?![A-Z0-9])", up)), "")
+
+
+def date_token(journey_date: str) -> str:
+    """"24-07-2026" → "24 Jul" (matches the date shown in an availability cell)."""
+    parts = (journey_date or "").split("-")
+    if len(parts) != 3:
+        return ""
+    day, month, _year = parts
+    try:
+        return f"{day} {_MONTHS_SHORT[int(month) - 1]}"
+    except (ValueError, IndexError):
+        return ""
+
+
+def extract_status(text: str) -> str:
+    """"Fri, 24 Jul WL30" → "WL30"; "Fri, 24 Jul REGRET" → "REGRET"; else ""."""
+    m = _STATUS_RE.search(text or "")
+    return " ".join(m.group(0).split()) if m else ""
+
+
+def extract_fare(text: str) -> str:
+    m = _FARE_RE.search(text or "")
+    return f"₹{m.group(1)}" if m else ""
+
+
+def status_for_date(cell_texts: list[str], journey_date: str = "") -> str:
+    """Pick the availability status for the journey date from date cells.
+
+    Cells look like ``["Fri, 24 Jul WL30", "Sat, 25 Jul WL31", …]``. Prefer the
+    cell whose date matches ``journey_date``; otherwise the first cell that has a
+    status.
+    """
+    token = date_token(journey_date)
+    fallback = ""
+    for text in cell_texts:
+        status = extract_status(text)
+        if not status:
+            continue
+        if token and token in " ".join(text.split()):
+            return status
+        if not fallback:
+            fallback = status
+    return fallback
 
 
 def _css(candidates: list[str]) -> str:
@@ -131,8 +177,25 @@ def _css(candidates: list[str]) -> str:
 # --------------------------------------------------------------------------- #
 
 
-async def parse_results(page, max_trains: int = 40) -> list[Train]:
-    """Return the list of :class:`Train` parsed from the results ``page``."""
+async def _texts(card, candidates: list[str]) -> list[str]:
+    for sel in [_css([c]) for c in candidates]:
+        try:
+            loc = card.locator(sel)
+            if await loc.count():
+                return [t.strip() for t in await loc.all_inner_texts() if t.strip()]
+        except Exception:  # noqa: BLE001
+            continue
+    return []
+
+
+async def _first_text(card, candidates: list[str]) -> str:
+    texts = await _texts(card, candidates)
+    return texts[0] if texts else ""
+
+
+async def parse_results(page, journey_date: str = "", want_class: str = "",
+                        max_trains: int = 40) -> list[Train]:
+    """Parse every ``<app-train-avl-enq>`` card into a :class:`Train`."""
     cards = page.locator(_css(S.TRAIN_CARD))
     try:
         count = min(await cards.count(), max_trains)
@@ -146,30 +209,42 @@ async def parse_results(page, max_trains: int = 40) -> list[Train]:
             full = await card.inner_text()
         except Exception:  # noqa: BLE001
             continue
-        train = parse_train_header(full)
 
-        cells = card.locator(_css(S.RESULT_CLASS_CELL))
-        seen: set[str] = set()
-        try:
-            n_cells = await cells.count()
-        except Exception:  # noqa: BLE001
-            n_cells = 0
-        for j in range(n_cells):
-            try:
-                cell_text = await cells.nth(j).inner_text()
-            except Exception:  # noqa: BLE001
-                continue
-            parsed = parse_class_cell(cell_text)
-            if parsed and parsed.class_code not in seen:
-                seen.add(parsed.class_code)
-                train.classes.append(parsed)
+        heading = await _first_text(card, S.TRAIN_HEADING)
+        train = parse_train_header(heading or full)
+
+        # Precise departure/arrival from the .time nodes when available.
+        time_texts = [re.sub(r"[^\d:]", "", t) for t in await _texts(card, S.TRAIN_TIME)]
+        time_texts = [t for t in time_texts if _TIME_RE.fullmatch(t)]
+        if time_texts:
+            train.departure = time_texts[0]
+            train.arrival = time_texts[-1]
+
+        # The active (clicked) class and every offered class.
+        active_code = code_from_label(await _first_text(card, S.ACTIVE_CLASS_TAB)) or (want_class or "")
+        offered = [code_from_label(t) for t in await _texts(card, S.ALL_CLASS_TABS)]
+        offered = [c for c in offered if c]
+
+        # Availability of the active class for the journey date.
+        cell_texts = await _texts(card, S.AVAIL_DATE_CELL)
+        status_raw = status_for_date(cell_texts, journey_date)
+        fare = extract_fare(full)
+
+        if active_code and status_raw:
+            train.classes.append(
+                ClassAvailability(active_code, status_raw, classify_availability(status_raw), fare)
+            )
+        for code in offered:
+            if not train.availability_for(code):
+                train.classes.append(ClassAvailability(code, "", Availability.UNKNOWN))
 
         if train.number or train.classes:
             trains.append(train)
     return trains
 
 
-def pick_target(trains: list[Train], class_code: str, train_number: str = "") -> tuple[Train, ClassAvailability] | None:
+def pick_target(trains: list[Train], class_code: str,
+                train_number: str = "") -> tuple[Train, ClassAvailability] | None:
     """Choose the best (train, class) to book.
 
     Priority: a bookable target-class on the requested train number, else the
@@ -185,11 +260,11 @@ def pick_target(trains: list[Train], class_code: str, train_number: str = "") ->
             ca = target.availability_for(code)
             return (target, ca) if ca else None
 
-    for t in trains:  # first bookable target-class across all trains
+    for t in trains:
         ca = t.availability_for(code)
         if ca and ca.bookable:
             return t, ca
-    for t in trains:  # else first train that even has the class (for reporting)
+    for t in trains:
         ca = t.availability_for(code)
         if ca:
             return t, ca
