@@ -178,6 +178,11 @@ class BehaviorConfig:
     headed: bool = True
     slow_mo_ms: int = 0
     browser: str = "chromium"
+    # Attach to an already-running browser over the DevTools protocol instead of
+    # launching a fresh one — e.g. your real Chrome started with
+    # --remote-debugging-port=9222, so the tool reuses its network AND your
+    # logged-in IRCTC session. Empty = launch a fresh browser.
+    cdp_url: str = ""
 
 
 @dataclass

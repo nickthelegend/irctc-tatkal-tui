@@ -85,6 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=int, default=45_000, help="navigation timeout (ms)")
     p.add_argument("--results-url", default=None,
                    help="parse this already-rendered results page instead of searching")
+    p.add_argument("--cdp", default="",
+                   help="attach to a running browser over CDP (e.g. http://127.0.0.1:9222) "
+                        "so the tool uses ITS network + your logged-in IRCTC session")
     return p
 
 
@@ -96,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
             journey_date=args.date, travel_class=args.travel_class,
             quota=args.quota, train_number=args.train,
         ),
-        behavior=BehaviorConfig(headed=args.headed, save_screenshots=False),
+        behavior=BehaviorConfig(headed=args.headed, save_screenshots=False, cdp_url=args.cdp),
     )
 
     def on_event(event):

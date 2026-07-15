@@ -141,6 +141,28 @@ TRAIN                    NO.    DEP    ARR    SL STATUS      FARE    OTHER
 Add `--headed` to watch it, or `--results-url <file/URL>` to parse an already-open
 results page.
 
+### Attach to your own Chrome (reuse your IRCTC login) — `--cdp`
+
+Instead of launching a fresh browser, the tool can **drive a Chrome you already
+have open** over the DevTools protocol — so it uses *that* browser's network and
+your **already-logged-in IRCTC session** (no re-login, no re-CAPTCHA per run):
+
+```bash
+# 1. Start Chrome with a debugging port, and log into IRCTC in it:
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --remote-debugging-port=9222 --user-data-dir=/tmp/irctc-chrome
+# (Linux: google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/irctc-chrome)
+
+# 2. Point the tool at it — it attaches and reuses that session:
+irctc-search --cdp http://127.0.0.1:9222 \
+    --from SC --to TPTY --date 25-07-2026 --class SL --quota TATKAL
+```
+
+The TUI can attach too — set `behavior.cdp_url` in `config.json`. The tool never
+closes your browser; it just disconnects when done. This is the recommended way
+to run the *live* booking: your real Chrome has the network access and the login,
+and the tool does the driving.
+
 ## The tabs
 
 | Tab | What you set |

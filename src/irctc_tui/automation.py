@@ -71,6 +71,7 @@ class IRCTCBot:
         self.page: Page | None = None
 
         self._stop = asyncio.Event()
+        self._attached = False  # True when connected to an existing browser over CDP
         self.phase: Phase = Phase.IDLE
         self.attempts = 0
         self.logged_in = False
@@ -138,17 +139,22 @@ class IRCTCBot:
     async def close(self) -> None:
         """Tear down Playwright. Call when the user is truly done."""
         try:
-            if self.config.account.reuse_session and self._context is not None:
+            if self.config.account.reuse_session and self._context is not None and not self._attached:
                 try:
                     await self._context.storage_state(path=str(self.storage_state_path))
                 except Exception:  # noqa: BLE001
                     pass
-            if self._context is not None:
-                await self._context.close()
-            if self._browser is not None:
-                await self._browser.close()
-            if self._pw is not None:
-                await self._pw.stop()
+            if self._attached:
+                # Attached to the user's browser — just disconnect, never close it.
+                if self._pw is not None:
+                    await self._pw.stop()
+            else:
+                if self._context is not None:
+                    await self._context.close()
+                if self._browser is not None:
+                    await self._browser.close()
+                if self._pw is not None:
+                    await self._pw.stop()
         finally:
             self._browser = self._context = self.page = self._pw = None
 
@@ -161,6 +167,19 @@ class IRCTCBot:
         b = self.config.behavior
         self._pw = await async_playwright().start()
         launcher = getattr(self._pw, b.browser, self._pw.chromium)
+
+        # Attach to an existing browser (your real, network-capable, logged-in
+        # Chrome) instead of launching a fresh sandboxed one.
+        if b.cdp_url:
+            await self._log(f"Attaching to existing browser over CDP: {b.cdp_url}")
+            self._browser = await launcher.connect_over_cdp(b.cdp_url)
+            self._attached = True
+            ctx = self._browser.contexts[0] if self._browser.contexts else await self._browser.new_context()
+            self._context = ctx
+            self.page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            await self._log("Attached — reusing that browser's network and session.", Level.SUCCESS)
+            return
+
         self._browser = await launcher.launch(
             headless=not b.headed,
             slow_mo=b.slow_mo_ms,
