@@ -1,0 +1,111 @@
+/* IRCTC Tatkal TUI — layout & theme */
+
+Screen {
+    layers: base overlay;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+.form-grid {
+    grid-size: 2;
+    grid-columns: 18 1fr;
+    grid-gutter: 1 2;
+    padding: 1 2;
+    height: auto;
+}
+
+.field-label {
+    content-align: left middle;
+    height: 3;
+    color: $text-muted;
+}
+
+.section-title {
+    text-style: bold;
+    color: $accent;
+    padding: 1 2 0 2;
+}
+
+.hint {
+    color: $text-muted;
+    text-style: italic;
+    padding: 0 2 1 2;
+}
+
+Input, Select {
+    width: 1fr;
+}
+
+Switch {
+    height: 3;
+}
+
+/* Passenger tab */
+#passenger-form {
+    grid-size: 5;
+    grid-columns: 1fr 10 14 16 14;
+    grid-gutter: 0 1;
+    height: auto;
+    padding: 1 2 0 2;
+}
+
+#passenger-buttons {
+    height: auto;
+    padding: 1 2;
+}
+
+#passenger_table {
+    height: 1fr;
+    margin: 0 2;
+}
+
+/* Run tab */
+#run-body {
+    height: 1fr;
+}
+
+#status-bar {
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+}
+
+.status-item {
+    width: 1fr;
+    height: 3;
+    border: round $primary;
+    padding: 0 1;
+    content-align: left middle;
+}
+
+#status_phase { color: $accent; text-style: bold; }
+#status_avail { color: $success; }
+#status_countdown { color: $warning; }
+
+#run-buttons {
+    height: auto;
+    padding: 0 2 1 2;
+}
+
+#log {
+    height: 1fr;
+    border: round $primary;
+    margin: 0 2 1 2;
+    background: $surface;
+}
+
+Button {
+    margin: 0 1 0 0;
+}
+
+.primary-btn { background: $success; }
+.danger-btn { background: $error; }
+
+#action-bar {
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-top: solid $primary;
+}
