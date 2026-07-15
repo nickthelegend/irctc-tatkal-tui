@@ -46,6 +46,9 @@ bookings.
   interval, a scheduled start time, retry limits, browser engine, and more.
 - **Headed browser** so you watch every step and can take over instantly.
 - **Custom availability polling** — check every *X* seconds (with jitter).
+- **📋 Results parser** — every check parses the results into structured trains
+  (number, name, times) with per-class availability (`AVAILABLE`/`RAC`/`WL`) and
+  fares, shown in a **live trains table** and used to auto-pick the best train.
 - **Scheduled start** — arm it before 10:00/11:00 AM and let it fire the moment
   the Tatkal window opens.
 - **Human-in-the-loop by design** — it pauses for you at login, CAPTCHA, and
@@ -126,7 +129,7 @@ python -m irctc_tui       # equivalent module form
 | **Timing** | Poll interval, jitter, scheduled start time, max attempts, retry-on-error. |
 | **Browser** | Auto-book toggle, headed/headless, browser engine, slow-mo, screenshots, contact mobile, UPI id (shown only), **alarm-on-success toggle + custom alarm sound**. |
 | **Telegram** | Enable alerts, **bot token**, **owner id**, and a **📤 Test Telegram** button. |
-| **Run** | Live status (phase, attempts, availability, next-check countdown), Start/Stop, **🔎 Pre-flight**, **🔔 Test alarm / 🔕 Silence**, and a colour-coded event log. |
+| **Run** | Live status (phase, attempts, availability, next-check countdown), a **live trains table**, Start/Stop, **🔎 Pre-flight**, **🔔 Test alarm / 🔕 Silence**, and a colour-coded event log. |
 
 <p align="center">
   <img src="docs/tui-journey.svg" alt="Journey tab" width="420">
@@ -164,6 +167,24 @@ reach review / payment  ──►  ⏸  YOU solve the CAPTCHA + pay   (+📲 "co
 
 The tool **stops at every ⏸**. It never touches the CAPTCHA or the payment, and
 the browser is left open for you to finish.
+
+## 📋 Reading the results
+
+On every check the tool parses the results page into structured data — one
+`Train` per service with its number, name, departure/arrival, and a
+`ClassAvailability` per class (status + fare):
+
+```
+✓ NARAYANADRI EXPRESS  12734  20:00  06:30  SL:AVAILABLE-0021  3A:RAC 5  2A:GNWL 34
+  PADMAVATI EXPRESS     12764  18:25  05:10  SL:GNWL 88/WL45    3A:AVAILABLE-0008
+  SESHADRI EXPRESS      17209  21:45  09:15  SL:REGRET/WL       2S:AVAILABLE-0102
+```
+
+This table updates live on the **Run** tab, and drives the booking decision: the
+tool picks the first train whose target class is **bookable** (`AVAILABLE`/`RAC`),
+or the specific `train_number` you set. The parser is **text-based** (regex over
+each card's text) so it survives IRCTC's frequent DOM changes — see
+[`results.py`](src/irctc_tui/results.py).
 
 ## Configuration reference
 
@@ -313,6 +334,7 @@ src/irctc_tui/
 ├── app.tcss        # TUI stylesheet
 ├── automation.py   # Playwright engine: search, poll, book, hand off
 ├── selectors.py    # ALL IRCTC selectors + availability parsing  ← edit when DOM changes
+├── results.py      # parse results into Train/ClassAvailability + pick the target
 ├── recon.py        # live DOM inspector + selector verifier (irctc-recon)
 ├── preflight.py    # in-app pre-flight selector check (streams to the Run log)
 ├── alarm.py        # cross-platform looping completion alarm
@@ -328,7 +350,7 @@ tests/              # config, selectors, alarm, notify, recon, and TUI tests
 
 ```bash
 uv pip install -e ".[dev]"
-pytest            # 46 tests; TUI/notify tests need no browser or network
+pytest            # 59 tests (incl. browser integration against local fixtures)
 ruff check src/   # lint
 ```
 
