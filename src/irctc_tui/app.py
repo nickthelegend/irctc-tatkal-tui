@@ -39,9 +39,13 @@ from textual.widgets import (
 from textual.worker import Worker
 
 from . import config as C
+from .alarm import AlarmPlayer
 from .automation import IRCTCBot
 from .config import AppConfig, Passenger
 from .events import BotEvent, Level, Phase
+
+# Phases at which the completion alarm should start ringing.
+_ALARM_PHASES = {Phase.AVAILABLE, Phase.BOOKING, Phase.PASSENGERS, Phase.HANDOFF, Phase.DONE}
 
 LEVEL_MARKUP = {
     Level.INFO: "white",
@@ -69,6 +73,7 @@ class IRCTCApp(App):
         ("ctrl+o", "load", "Load"),
         ("ctrl+r", "start", "Start"),
         ("ctrl+t", "stop", "Stop"),
+        ("ctrl+g", "silence", "Silence alarm"),
         ("f5", "validate", "Validate"),
         ("ctrl+q", "quit", "Quit"),
     ]
@@ -82,6 +87,7 @@ class IRCTCApp(App):
         self._passengers: list[Passenger] = list(self.cfg.passengers)
         self._bot: IRCTCBot | None = None
         self._worker: Worker | None = None
+        self._alarm: AlarmPlayer | None = None
 
     # ------------------------------------------------------------------ #
     # Layout
@@ -197,6 +203,11 @@ class IRCTCApp(App):
             yield Input(value=b.contact_mobile, id="contact_mobile", placeholder="10-digit mobile")
             yield Label("UPI id (shown only)", classes="field-label")
             yield Input(value=b.upi_id, id="upi_id", placeholder="name@bank — never auto-paid")
+            yield Label("Alarm on success", classes="field-label")
+            yield Switch(value=b.alarm_on_success, id="alarm_on_success")
+            yield Label("Alarm sound file", classes="field-label")
+            yield Input(value=b.alarm_sound_path, id="alarm_sound_path",
+                        placeholder="blank = built-in tune; or path to your .wav/.mp3")
 
     def _run_tab(self) -> ComposeResult:
         with Vertical(id="run-body"):
@@ -208,8 +219,11 @@ class IRCTCApp(App):
             with Horizontal(id="run-buttons"):
                 yield Button("▶ Start", id="start", variant="success")
                 yield Button("■ Stop", id="stop", variant="error")
-                yield Button("💾 Save config", id="save")
+                yield Button("🔕 Silence", id="silence_alarm", variant="warning")
+                yield Button("💾 Save", id="save")
+            with Horizontal(id="run-buttons-2"):
                 yield Button("✓ Validate", id="validate")
+                yield Button("🔔 Test alarm", id="test_alarm")
                 yield Button("✕ Close browser", id="close_browser")
             yield RichLog(id="log", highlight=True, markup=True, wrap=True)
 
@@ -334,6 +348,8 @@ class IRCTCApp(App):
                 save_screenshots=sw("save_screenshots"),
                 contact_mobile=f("contact_mobile"),
                 upi_id=f("upi_id"),
+                alarm_on_success=sw("alarm_on_success"),
+                alarm_sound_path=f("alarm_sound_path"),
             ),
         )
         return cfg
@@ -385,6 +401,37 @@ class IRCTCApp(App):
     @on(Button.Pressed, "#close_browser")
     def _btn_close_browser(self) -> None:
         self.run_worker(self._close_bot(), exclusive=False)
+
+    @on(Button.Pressed, "#test_alarm")
+    def _btn_test_alarm(self) -> None:
+        path = self.query_one("#alarm_sound_path", Input).value.strip()
+        self._start_alarm(path)
+        self._log_line("Testing alarm — press 🔕 Silence (Ctrl+G) to stop.", Level.HUMAN)
+
+    @on(Button.Pressed, "#silence_alarm")
+    def _btn_silence_alarm(self) -> None:
+        self.action_silence()
+
+    def _start_alarm(self, sound_path: str = "") -> None:
+        if self._alarm is not None and self._alarm.playing:
+            return
+        try:
+            if self._alarm is not None:
+                self._alarm.stop()
+            self._alarm = AlarmPlayer(sound_path or None)
+            if not self._alarm.available:
+                self._log_line("No audio player found; alarm will use the terminal bell.", Level.WARN)
+            self._alarm.start()
+        except Exception as exc:  # noqa: BLE001
+            self._log_line(f"Could not start alarm: {exc}", Level.ERROR)
+
+    def action_silence(self) -> None:
+        if self._alarm is not None and self._alarm.playing:
+            self._alarm.stop()
+            self._log_line("Alarm silenced.", Level.INFO)
+            self.notify("Alarm silenced.")
+        else:
+            self.notify("No alarm is ringing.")
 
     def action_start(self) -> None:
         if self._worker is not None and self._worker.is_running:
@@ -445,10 +492,19 @@ class IRCTCApp(App):
             self._safe_update("#status_avail", f"Availability: {raw}")
         if event.kind == "countdown":
             self._safe_update("#status_countdown", f"Next: {event.message}")
-        if event.phase in (Phase.AVAILABLE, Phase.BOOKING, Phase.PASSENGERS, Phase.HANDOFF, Phase.DONE):
+        if event.phase in _ALARM_PHASES:
             # Make sure the user sees these prominently in the log too.
             if event.kind == "phase":
                 self._log_line(f"» {event.message}", event.level)
+            # Ring the completion alarm the moment a seat is within reach.
+            if self.cfg.behavior.alarm_on_success:
+                already = self._alarm is not None and self._alarm.playing
+                self._start_alarm(self.cfg.behavior.alarm_sound_path)
+                if not already:
+                    self._log_line(
+                        "🔔 ALARM RINGING — come to the browser. Press 🔕 Silence (Ctrl+G) to stop.",
+                        Level.HUMAN,
+                    )
 
     # ------------------------------------------------------------------ #
     # Small helpers
@@ -470,6 +526,8 @@ class IRCTCApp(App):
         log.write(f"[dim]{stamp}[/dim] [{style}]{_escape(message)}[/{style}]")
 
     async def action_quit(self) -> None:  # type: ignore[override]
+        if self._alarm is not None:
+            self._alarm.stop()
         if self._bot is not None:
             self._bot.stop()
             await self._bot.close()

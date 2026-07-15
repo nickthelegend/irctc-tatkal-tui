@@ -168,6 +168,11 @@ class BehaviorConfig:
     upi_id: str = ""
     contact_mobile: str = ""
     save_screenshots: bool = True
+    # Ring a looping alarm when a seat is found / payment hand-off is reached, so
+    # you can step away and be called back. You silence it manually in the TUI.
+    alarm_on_success: bool = True
+    # Path to a .wav/.mp3 to ring. Empty = a built-in tune synthesised on first use.
+    alarm_sound_path: str = ""
     # Headed is the default (you asked to watch it). Headless is offered for
     # dry-runs but IRCTC actively blocks headless traffic.
     headed: bool = True

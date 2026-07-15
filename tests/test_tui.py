@@ -6,8 +6,9 @@ are safe and fast in CI.
 
 import asyncio
 
-from irctc_tui.app import IRCTCApp
 from textual.widgets import DataTable, Input, TabbedContent
+
+from irctc_tui.app import IRCTCApp
 
 
 def _run(coro):
@@ -77,5 +78,23 @@ def test_save_writes_config_file(tmp_path):
             from irctc_tui.config import AppConfig
 
             assert AppConfig.load(path).journey.from_station == "KCG"
+
+    _run(scenario())
+
+
+def test_alarm_settings_collected_and_silence_is_safe(tmp_path):
+    from textual.widgets import Switch
+
+    async def scenario():
+        app = IRCTCApp(config_path=tmp_path / "config.json")
+        async with app.run_test():
+            app.query_one("#alarm_on_success", Switch).value = False
+            app.query_one("#alarm_sound_path", Input).value = "/tmp/song.mp3"
+            cfg = app._collect_config()
+            assert cfg.behavior.alarm_on_success is False
+            assert cfg.behavior.alarm_sound_path == "/tmp/song.mp3"
+            # Silencing when nothing rings must not raise or start audio.
+            app.action_silence()
+            assert app._alarm is None
 
     _run(scenario())

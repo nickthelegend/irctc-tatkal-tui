@@ -86,6 +86,11 @@ Switch {
 
 #run-buttons {
     height: auto;
+    padding: 0 2 0 2;
+}
+
+#run-buttons-2 {
+    height: auto;
     padding: 0 2 1 2;
 }
 

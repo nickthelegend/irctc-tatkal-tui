@@ -39,6 +39,8 @@
     "upi_id": "",
     "contact_mobile": "",
     "save_screenshots": true,
+    "alarm_on_success": true,
+    "alarm_sound_path": "",
     "headed": true,
     "slow_mo_ms": 0,
     "browser": "chromium"
