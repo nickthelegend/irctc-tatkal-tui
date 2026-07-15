@@ -44,5 +44,10 @@
     "headed": true,
     "slow_mo_ms": 0,
     "browser": "chromium"
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "",
+    "owner_id": ""
   }
 }

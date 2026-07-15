@@ -181,6 +181,20 @@ class BehaviorConfig:
 
 
 @dataclass
+class TelegramConfig:
+    """Telegram bot alerts sent to the owner's chat.
+
+    Create a bot with @BotFather to get ``bot_token``; get your ``owner_id``
+    (numeric chat id) from @userinfobot. Both are stored in the git-ignored
+    config — treat the token like a password.
+    """
+
+    enabled: bool = False
+    bot_token: str = ""
+    owner_id: str = ""
+
+
+@dataclass
 class AppConfig:
     """Top-level config aggregating every section."""
 
@@ -189,6 +203,7 @@ class AppConfig:
     passengers: list[Passenger] = field(default_factory=list)
     timing: TimingConfig = field(default_factory=TimingConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
     # ---- serialisation ---------------------------------------------------- #
 
@@ -210,6 +225,7 @@ class AppConfig:
             passengers=passengers,
             timing=build(TimingConfig, data.get("timing", {})),
             behavior=build(BehaviorConfig, data.get("behavior", {})),
+            telegram=build(TelegramConfig, data.get("telegram", {})),
         )
 
     def save(self, path: str | Path) -> None:
@@ -255,6 +271,11 @@ class AppConfig:
             problems.append("Timing: start time must be HH:MM:SS (e.g. 10:00:00).")
         if self.account.auto_login and not self.account.username.strip():
             problems.append("Account: auto-login is on but username is empty.")
+        if self.telegram.enabled:
+            if not self.telegram.bot_token.strip():
+                problems.append("Telegram: enabled but bot token is empty.")
+            if not self.telegram.owner_id.strip():
+                problems.append("Telegram: enabled but owner id is empty.")
         return problems
 
 
@@ -300,4 +321,5 @@ def example_config() -> AppConfig:
         ],
         timing=TimingConfig(check_interval_seconds=15.0, jitter_seconds=3.0, start_time="11:00:00"),
         behavior=BehaviorConfig(contact_mobile="", upi_id=""),
+        telegram=TelegramConfig(enabled=False, bot_token="", owner_id=""),
     )
