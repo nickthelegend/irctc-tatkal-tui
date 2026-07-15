@@ -115,6 +115,18 @@ JOURNEY_DATE_INPUT = [
     'input[aria-label="Journey Date(dd-mm-yyyy)"]',
 ]
 
+# PrimeNG calendar (journey date picker) — used when the field can't be typed.
+CALENDAR_PANEL = [".ui-datepicker", ".p-datepicker"]
+CALENDAR_PREV = [".ui-datepicker-prev", ".p-datepicker-prev", 'a[title="Prev"]']
+CALENDAR_NEXT = [".ui-datepicker-next", ".p-datepicker-next", 'a[title="Next"]']
+CALENDAR_MONTH_LABEL = [".ui-datepicker-month", ".p-datepicker-month"]
+CALENDAR_YEAR_LABEL = [".ui-datepicker-year", ".p-datepicker-year"]
+CALENDAR_DAY_CELLS = [
+    ".ui-datepicker-calendar td a",
+    ".p-datepicker-calendar td span:not(.p-disabled)",
+    "table.ui-datepicker-calendar td a",
+]
+
 QUOTA_DROPDOWN = [
     "#journeyQuota",
     'p-dropdown[formcontrolname="journeyQuota"]',
