@@ -16,6 +16,7 @@ without threads.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from textual.widgets import (
 from textual.worker import Worker
 
 from . import config as C
+from . import stations
 from .alarm import AlarmPlayer
 from .automation import IRCTCBot
 from .config import AppConfig, Passenger
@@ -50,6 +52,16 @@ from .preflight import run_preflight
 _ALARM_PHASES = {Phase.AVAILABLE, Phase.BOOKING, Phase.PASSENGERS, Phase.HANDOFF, Phase.DONE}
 # Phases that trigger a Telegram alert (once each).
 _NOTIFY_PHASES = {Phase.AVAILABLE, Phase.HANDOFF, Phase.DONE, Phase.STOPPED, Phase.ERROR}
+
+_TG_HELP = (
+    "🚆 IRCTC TUI — remote commands:\n"
+    "• status — current phase / attempts\n"
+    "• run — start the booking run\n"
+    "• stop — stop the run\n"
+    "• silence — silence the alarm\n"
+    "• shot — screenshot the live browser\n"
+    "• help — this message"
+)
 
 LEVEL_MARKUP = {
     Level.INFO: "white",
@@ -96,6 +108,8 @@ class IRCTCApp(App):
         self._alarm: AlarmPlayer | None = None
         self._notifier: TelegramNotifier | None = None
         self._notified_texts: set[str] = set()
+        self._tg_listening: bool = False
+        self._tg_offset: int | None = None
 
     # ------------------------------------------------------------------ #
     # Layout
@@ -126,14 +140,17 @@ class IRCTCApp(App):
         j = self.cfg.journey
         yield Static("Where and when", classes="section-title")
         yield Static(
-            "Type a station code (SC, HYB, KCG, TPTY…) — the top autocomplete match is used.",
+            "Pick your stations from the dropdowns. Open one and type to jump "
+            "(e.g. 'TIR' → Tirupati). Missing one? Add it to stations.py.",
             classes="hint",
         )
         with Grid(classes="form-grid"):
             yield Label("From station", classes="field-label")
-            yield Input(value=j.from_station, id="from_station", placeholder="e.g. SC")
+            yield Select(stations.options(j.from_station), value=j.from_station,
+                         id="from_station", allow_blank=False)
             yield Label("To station", classes="field-label")
-            yield Input(value=j.to_station, id="to_station", placeholder="e.g. TPTY")
+            yield Select(stations.options(j.to_station), value=j.to_station,
+                         id="to_station", allow_blank=False)
             yield Label("Journey date", classes="field-label")
             yield Input(value=j.journey_date, id="journey_date", placeholder="DD-MM-YYYY")
             yield Label("Class", classes="field-label")
@@ -273,6 +290,11 @@ class IRCTCApp(App):
         )
         if self.config_path.exists():
             self._log_line(f"Loaded config from {self.config_path}", Level.SUCCESS)
+        # Bring Telegram remote control online if it's already configured.
+        tg = self.cfg.telegram
+        if tg.enabled and tg.bot_token and tg.owner_id:
+            self._notifier = TelegramNotifier(tg.bot_token, tg.owner_id, enabled=True)
+            self._ensure_tg_listener()
 
     # ------------------------------------------------------------------ #
     # Passenger management
@@ -356,8 +378,8 @@ class IRCTCApp(App):
                 reuse_session=sw("reuse_session"),
             ),
             journey=C.JourneyConfig(
-                from_station=f("from_station"),
-                to_station=f("to_station"),
+                from_station=sel("from_station"),
+                to_station=sel("to_station"),
                 journey_date=f("journey_date"),
                 travel_class=sel("travel_class"),
                 quota=sel("quota"),
@@ -514,6 +536,9 @@ class IRCTCApp(App):
         if ok:
             self._log_line("Telegram test sent ✓ — check your chat.", Level.SUCCESS)
             self.notify("Telegram test sent.")
+            # Creds verified — bring remote control online now.
+            self._notifier = notifier
+            self._ensure_tg_listener()
         else:
             self._log_line(f"Telegram test failed: {detail[:160]}", Level.ERROR)
             self.notify("Telegram test failed — see the log.", severity="error")
@@ -535,6 +560,98 @@ class IRCTCApp(App):
             return
         self._notified_texts.add(text)
         await self._send_telegram(text)
+
+    # ------------------------------------------------------------------ #
+    # Two-way Telegram control
+    # ------------------------------------------------------------------ #
+
+    def _ensure_tg_listener(self) -> None:
+        """Start the command-polling worker once, if Telegram is configured."""
+        if self._tg_listening or self._notifier is None or not self._notifier.enabled:
+            return
+        self._tg_listening = True
+        self.run_worker(self._telegram_listen(), exclusive=False, name="tg_listen")
+        self._log_line("Telegram remote control online — send 'help' to your bot.", Level.INFO)
+
+    async def _telegram_listen(self) -> None:
+        notifier = self._notifier
+        if notifier is None:
+            self._tg_listening = False
+            return
+        # Skip messages sent before we came online so stale commands don't fire.
+        try:
+            stale = await notifier.get_updates()
+            self._tg_offset = (stale[-1]["update_id"] + 1) if stale else None
+        except Exception:  # noqa: BLE001
+            self._tg_offset = None
+        await notifier.send("🤖 IRCTC TUI remote control online. Send 'help' for commands.")
+        while self._tg_listening:
+            try:
+                updates = await notifier.get_updates(offset=self._tg_offset, timeout=0)
+                for update in updates:
+                    self._tg_offset = update["update_id"] + 1
+                    message = update.get("message") or {}
+                    chat_id = str((message.get("chat") or {}).get("id"))
+                    body = (message.get("text") or "").strip()
+                    if not body:
+                        continue
+                    if notifier.owner_id and chat_id != notifier.owner_id:
+                        continue  # only the owner may control the run
+                    self._log_line(f"Telegram ⟵ {body}", Level.INFO)
+                    reply = await self._handle_tg_command(body)
+                    if reply:
+                        await notifier.send(reply)
+            except Exception as exc:  # noqa: BLE001 - never let polling kill the app
+                self._log_line(f"Telegram poll error: {exc}", Level.WARN)
+            await asyncio.sleep(3.0)
+
+    async def _handle_tg_command(self, text: str) -> str:
+        parts = text.strip().lstrip("/").split()
+        cmd = parts[0].lower() if parts else ""
+        if cmd in ("status", "state"):
+            return self._status_text()
+        if cmd == "stop":
+            self.action_stop()
+            return "🛑 Stop requested."
+        if cmd in ("run", "book", "go"):
+            if self._worker is not None and self._worker.is_running:
+                return "Already running."
+            self.action_start()
+            running = self._worker is not None and self._worker.is_running
+            return "▶️ Booking run started." if running else "Couldn't start — config invalid (check the app)."
+        if cmd in ("silence", "mute", "stopalarm"):
+            self.action_silence()
+            return "🔕 Alarm silenced."
+        if cmd in ("shot", "screenshot", "pic", "photo"):
+            return await self._send_browser_shot()
+        if cmd in ("help", "start", "commands", "?"):
+            return _TG_HELP
+        return f"Unknown command '{cmd}'. Send 'help' for the list."
+
+    def _status_text(self) -> str:
+        if self._bot is None:
+            return "📊 Status: idle (no run active). Send 'run' to start."
+        running = self._worker is not None and self._worker.is_running
+        return (
+            "📊 IRCTC TUI status\n"
+            f"Phase: {self._bot.phase.value}\n"
+            f"Attempts: {self._bot.attempts}\n"
+            f"Running: {'yes' if running else 'no'}\n"
+            f"Logged in: {'yes' if self._bot.logged_in else 'no'}"
+        )
+
+    async def _send_browser_shot(self) -> str:
+        if self._bot is None or self._bot.page is None:
+            return "No browser is open to screenshot."
+        if self._notifier is None:
+            return "Telegram is not configured."
+        path = self.config_path.parent / ".tg_shot.png"
+        try:
+            await self._bot.page.screenshot(path=str(path))
+        except Exception as exc:  # noqa: BLE001
+            return f"Screenshot failed: {exc}"
+        ok, detail = await self._notifier.send_photo(str(path), caption="Current browser view")
+        return "" if ok else f"Screenshot send failed: {detail[:100]}"
 
     def action_start(self) -> None:
         if self._worker is not None and self._worker.is_running:
@@ -563,6 +680,7 @@ class IRCTCApp(App):
             self._log_line("Telegram alerts enabled for this run.", Level.INFO)
             self.run_worker(self._send_telegram(f"▶️ IRCTC TUI booking started: {route}"),
                             exclusive=False)
+            self._ensure_tg_listener()
         self._bot = IRCTCBot(cfg, on_event=self._on_bot_event)
         self._worker = self.run_worker(self._run_bot(), exclusive=True, name="booking")
 
@@ -643,6 +761,7 @@ class IRCTCApp(App):
         log.write(f"[dim]{stamp}[/dim] [{style}]{_escape(message)}[/{style}]")
 
     async def action_quit(self) -> None:  # type: ignore[override]
+        self._tg_listening = False
         if self._alarm is not None:
             self._alarm.stop()
         if self._bot is not None:
