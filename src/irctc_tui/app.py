@@ -43,9 +43,13 @@ from .alarm import AlarmPlayer
 from .automation import IRCTCBot
 from .config import AppConfig, Passenger
 from .events import BotEvent, Level, Phase
+from .notify import TelegramNotifier
+from .preflight import run_preflight
 
 # Phases at which the completion alarm should start ringing.
 _ALARM_PHASES = {Phase.AVAILABLE, Phase.BOOKING, Phase.PASSENGERS, Phase.HANDOFF, Phase.DONE}
+# Phases that trigger a Telegram alert (once each).
+_NOTIFY_PHASES = {Phase.AVAILABLE, Phase.HANDOFF, Phase.DONE, Phase.STOPPED, Phase.ERROR}
 
 LEVEL_MARKUP = {
     Level.INFO: "white",
@@ -74,6 +78,7 @@ class IRCTCApp(App):
         ("ctrl+r", "start", "Start"),
         ("ctrl+t", "stop", "Stop"),
         ("ctrl+g", "silence", "Silence alarm"),
+        ("f2", "preflight", "Pre-flight"),
         ("f5", "validate", "Validate"),
         ("ctrl+q", "quit", "Quit"),
     ]
@@ -87,7 +92,10 @@ class IRCTCApp(App):
         self._passengers: list[Passenger] = list(self.cfg.passengers)
         self._bot: IRCTCBot | None = None
         self._worker: Worker | None = None
+        self._preflight_worker: Worker | None = None
         self._alarm: AlarmPlayer | None = None
+        self._notifier: TelegramNotifier | None = None
+        self._notified_texts: set[str] = set()
 
     # ------------------------------------------------------------------ #
     # Layout
@@ -106,6 +114,8 @@ class IRCTCApp(App):
                 yield from self._timing_tab()
             with TabPane("Browser", id="tab-browser"):
                 yield from self._browser_tab()
+            with TabPane("Telegram", id="tab-telegram"):
+                yield from self._telegram_tab()
             with TabPane("Run", id="tab-run"):
                 yield from self._run_tab()
         yield Footer()
@@ -209,6 +219,26 @@ class IRCTCApp(App):
             yield Input(value=b.alarm_sound_path, id="alarm_sound_path",
                         placeholder="blank = built-in tune; or path to your .wav/.mp3")
 
+    def _telegram_tab(self) -> ComposeResult:
+        t = self.cfg.telegram
+        yield Static("Telegram alerts", classes="section-title")
+        yield Static(
+            "Get pinged when a seat is found / it's time to pay. "
+            "Token from @BotFather; owner id (numeric) from @userinfobot. "
+            "Both are stored in the git-ignored config — treat the token like a password.",
+            classes="hint",
+        )
+        with Grid(classes="form-grid"):
+            yield Label("Enabled", classes="field-label")
+            yield Switch(value=t.enabled, id="tg_enabled")
+            yield Label("Bot token", classes="field-label")
+            yield Input(value=t.bot_token, id="tg_token", password=True,
+                        placeholder="123456:ABC-DEF… from @BotFather")
+            yield Label("Owner id", classes="field-label")
+            yield Input(value=t.owner_id, id="tg_owner", placeholder="your numeric chat id")
+        with Horizontal(id="telegram-buttons"):
+            yield Button("📤 Test Telegram", id="test_telegram", variant="primary")
+
     def _run_tab(self) -> ComposeResult:
         with Vertical(id="run-body"):
             with Horizontal(id="status-bar"):
@@ -222,6 +252,7 @@ class IRCTCApp(App):
                 yield Button("🔕 Silence", id="silence_alarm", variant="warning")
                 yield Button("💾 Save", id="save")
             with Horizontal(id="run-buttons-2"):
+                yield Button("🔎 Pre-flight", id="preflight", variant="primary")
                 yield Button("✓ Validate", id="validate")
                 yield Button("🔔 Test alarm", id="test_alarm")
                 yield Button("✕ Close browser", id="close_browser")
@@ -351,6 +382,11 @@ class IRCTCApp(App):
                 alarm_on_success=sw("alarm_on_success"),
                 alarm_sound_path=f("alarm_sound_path"),
             ),
+            telegram=C.TelegramConfig(
+                enabled=sw("tg_enabled"),
+                bot_token=self.query_one("#tg_token", Input).value.strip(),
+                owner_id=f("tg_owner"),
+            ),
         )
         return cfg
 
@@ -433,6 +469,73 @@ class IRCTCApp(App):
         else:
             self.notify("No alarm is ringing.")
 
+    # ------------------------------------------------------------------ #
+    # Pre-flight selector check
+    # ------------------------------------------------------------------ #
+
+    @on(Button.Pressed, "#preflight")
+    def _btn_preflight(self) -> None:
+        self.action_preflight()
+
+    def action_preflight(self) -> None:
+        if self._preflight_worker is not None and self._preflight_worker.is_running:
+            self.notify("Pre-flight already running.", severity="warning")
+            return
+        cfg = self._collect_config()
+        self.get_child_by_type(TabbedContent).active = "tab-run"
+        self._log_line("Pre-flight: verifying selectors against the live IRCTC site…", Level.INFO)
+        self._preflight_worker = self.run_worker(
+            self._run_preflight(cfg), exclusive=False, name="preflight"
+        )
+
+    async def _run_preflight(self, cfg: AppConfig) -> None:
+        try:
+            await run_preflight(cfg, self._on_bot_event)
+        except Exception as exc:  # noqa: BLE001
+            self._log_line(f"Pre-flight crashed: {exc}", Level.ERROR)
+
+    # ------------------------------------------------------------------ #
+    # Telegram
+    # ------------------------------------------------------------------ #
+
+    @on(Button.Pressed, "#test_telegram")
+    def _btn_test_telegram(self) -> None:
+        token = self.query_one("#tg_token", Input).value.strip()
+        owner = self.query_one("#tg_owner", Input).value.strip()
+        if not token or not owner:
+            self.notify("Enter the bot token and owner id first.", severity="error")
+            return
+        self._log_line("Sending a Telegram test message…", Level.INFO)
+        self.run_worker(self._test_telegram(token, owner), exclusive=False)
+
+    async def _test_telegram(self, token: str, owner: str) -> None:
+        notifier = TelegramNotifier(token, owner, enabled=True)
+        ok, detail = await notifier.send("✅ IRCTC Tatkal TUI — your Telegram alerts are working!")
+        if ok:
+            self._log_line("Telegram test sent ✓ — check your chat.", Level.SUCCESS)
+            self.notify("Telegram test sent.")
+        else:
+            self._log_line(f"Telegram test failed: {detail[:160]}", Level.ERROR)
+            self.notify("Telegram test failed — see the log.", severity="error")
+
+    async def _send_telegram(self, text: str) -> None:
+        if self._notifier is not None and self._notifier.enabled:
+            ok, detail = await self._notifier.send(text)
+            if not ok:
+                self._log_line(f"Telegram send failed: {detail[:120]}", Level.WARN)
+
+    async def _maybe_notify(self, event: BotEvent) -> None:
+        if self._notifier is None or not self._notifier.enabled or not event.message:
+            return
+        trigger = (event.kind == "phase" and event.phase in _NOTIFY_PHASES) or event.level == Level.HUMAN
+        if not trigger:
+            return
+        text = f"🚆 IRCTC TUI — {event.message}"
+        if text in self._notified_texts:
+            return
+        self._notified_texts.add(text)
+        await self._send_telegram(text)
+
     def action_start(self) -> None:
         if self._worker is not None and self._worker.is_running:
             self.notify("Already running.", severity="warning")
@@ -449,6 +552,17 @@ class IRCTCApp(App):
         self.cfg = cfg
         self.get_child_by_type(TabbedContent).active = "tab-run"
         self._log_line("Starting booking run…", Level.SUCCESS)
+        # (Re)build the Telegram notifier for this run.
+        self._notifier = TelegramNotifier(
+            cfg.telegram.bot_token, cfg.telegram.owner_id, enabled=cfg.telegram.enabled
+        )
+        self._notified_texts.clear()
+        if self._notifier.enabled:
+            j = cfg.journey
+            route = f"{j.from_station}→{j.to_station} {j.journey_date} {j.quota}/{j.travel_class}"
+            self._log_line("Telegram alerts enabled for this run.", Level.INFO)
+            self.run_worker(self._send_telegram(f"▶️ IRCTC TUI booking started: {route}"),
+                            exclusive=False)
         self._bot = IRCTCBot(cfg, on_event=self._on_bot_event)
         self._worker = self.run_worker(self._run_bot(), exclusive=True, name="booking")
 
@@ -505,6 +619,9 @@ class IRCTCApp(App):
                         "🔔 ALARM RINGING — come to the browser. Press 🔕 Silence (Ctrl+G) to stop.",
                         Level.HUMAN,
                     )
+
+        # Fire a Telegram alert for key moments (once each).
+        await self._maybe_notify(event)
 
     # ------------------------------------------------------------------ #
     # Small helpers

@@ -98,3 +98,38 @@ def test_alarm_settings_collected_and_silence_is_safe(tmp_path):
             assert app._alarm is None
 
     _run(scenario())
+
+
+def test_telegram_settings_collected_and_validated(tmp_path):
+    from textual.widgets import Switch
+
+    async def scenario():
+        app = IRCTCApp(config_path=tmp_path / "config.json")
+        async with app.run_test() as pilot:
+            app.query_one(TabbedContent).active = "tab-telegram"
+            await pilot.pause()
+            app.query_one("#tg_enabled", Switch).value = True
+            # enabled but blank creds -> validation complains
+            problems = app._collect_config().validate()
+            assert any("bot token is empty" in p for p in problems)
+            assert any("owner id is empty" in p for p in problems)
+            # fill them in
+            app.query_one("#tg_token", Input).value = "123:abc"
+            app.query_one("#tg_owner", Input).value = "555"
+            cfg = app._collect_config()
+            assert cfg.telegram.enabled is True
+            assert cfg.telegram.bot_token == "123:abc"
+            assert cfg.telegram.owner_id == "555"
+
+    _run(scenario())
+
+
+def test_preflight_button_present_but_not_triggered(tmp_path):
+    async def scenario():
+        app = IRCTCApp(config_path=tmp_path / "config.json")
+        async with app.run_test():
+            # Button exists; we intentionally do NOT press it (it launches a browser).
+            assert app.query_one("#preflight") is not None
+            assert app._preflight_worker is None
+
+    _run(scenario())

@@ -56,6 +56,11 @@ Switch {
     padding: 1 2;
 }
 
+#telegram-buttons {
+    height: auto;
+    padding: 1 2;
+}
+
 #passenger_table {
     height: 1fr;
     margin: 0 2;
