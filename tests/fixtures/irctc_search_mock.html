@@ -1,0 +1,167 @@
+<!doctype html>
+<!--
+  A local stand-in for the IRCTC /nget/train-search form. It mirrors the real
+  page's PrimeNG structure (p-autocomplete origin/destination, p-calendar,
+  p-dropdown quota/class) so the tool's OWN selectors and interaction logic can
+  drive it — proving the automation engine works without touching live IRCTC.
+
+  Whatever the bot selects is recorded into #result (and window.__captured).
+-->
+<html lang="en">
+<head><meta charset="utf-8"><title>IRCTC search (local mock)</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; max-width: 460px; }
+  h1 { font-size: 18px; }
+  .field { margin: 10px 0; }
+  input, .pdrop { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #99a; border-radius: 6px; }
+  .pdrop { cursor: pointer; background: #fff; }
+  .ui-autocomplete-panel, .ui-dropdown-panel, .ui-datepicker {
+    border: 1px solid #99a; border-radius: 6px; background: #fff; margin-top: 2px;
+  }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { padding: 8px; cursor: pointer; }
+  li:hover { background: #e8eefc; }
+  .ui-datepicker-header { display: flex; justify-content: space-between; align-items: center; padding: 6px; }
+  .ui-datepicker-calendar td a { display: inline-block; width: 30px; padding: 4px; text-align: center; cursor: pointer; }
+  .ui-datepicker-calendar td a:hover { background: #e8eefc; }
+  button.search-btn { margin-top: 12px; padding: 10px 20px; background: #1b4; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+  #result { margin-top: 16px; background: #0b1e33; color: #7fd; padding: 12px; border-radius: 6px; white-space: pre-wrap; min-height: 20px; }
+</style>
+</head>
+<body>
+<h1>🚆 BOOK TICKET (local mock of IRCTC)</h1>
+
+<div class="field">
+  <p-autocomplete formcontrolname="origin">
+    <input type="text" class="ac" data-field="origin" placeholder="From*">
+    <div class="ui-autocomplete-panel" data-for="origin" style="display:none"></div>
+  </p-autocomplete>
+</div>
+
+<div class="field">
+  <p-autocomplete formcontrolname="destination">
+    <input type="text" class="ac" data-field="destination" placeholder="To*">
+    <div class="ui-autocomplete-panel" data-for="destination" style="display:none"></div>
+  </p-autocomplete>
+</div>
+
+<div class="field">
+  <p-calendar formcontrolname="journeyDate">
+    <input type="text" class="date" readonly value="16/07/2026" placeholder="DD/MM/YYYY">
+    <div class="ui-datepicker" style="display:none">
+      <div class="ui-datepicker-header">
+        <a class="ui-datepicker-prev" href="javascript:void(0)">‹</a>
+        <span><span class="ui-datepicker-month">July</span> <span class="ui-datepicker-year">2026</span></span>
+        <a class="ui-datepicker-next" href="javascript:void(0)">›</a>
+      </div>
+      <table class="ui-datepicker-calendar"><tbody id="days"></tbody></table>
+    </div>
+  </p-calendar>
+</div>
+
+<div class="field">
+  <p-dropdown id="journeyQuota">
+    <div class="pdrop" data-label>GENERAL</div>
+    <div class="ui-dropdown-panel" style="display:none">
+      <ul><li>GENERAL</li><li>TATKAL</li><li>PREMIUM TATKAL</li><li>LADIES</li></ul>
+    </div>
+  </p-dropdown>
+</div>
+
+<div class="field">
+  <p-dropdown id="jClass">
+    <div class="pdrop" data-label>All Classes</div>
+    <div class="ui-dropdown-panel" style="display:none">
+      <ul><li>Sleeper (SL)</li><li>AC 3 Tier (3A)</li><li>AC 2 Tier (2A)</li><li>Second Sitting (2S)</li></ul>
+    </div>
+  </p-dropdown>
+</div>
+
+<button class="search-btn">Search</button>
+<div id="result">waiting for the bot…</div>
+
+<script>
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const captured = { origin:"", destination:"", date:"", quota:"", travelClass:"", searched:false };
+window.__captured = captured;
+function render() { document.getElementById('result').textContent = JSON.stringify(captured, null, 2); }
+
+// Fixed station suggestions the mock offers for each field.
+const SUGGEST = { origin: "SECUNDERABAD JN - SC", destination: "TIRUPATI - TPTY" };
+
+function hideAllAC() {
+  document.querySelectorAll('.ui-autocomplete-panel').forEach(p => { p.style.display='none'; p.innerHTML=''; });
+}
+// Autocomplete: on typing, show one suggestion; clicking it records the value.
+document.querySelectorAll('input.ac').forEach(inp => {
+  inp.addEventListener('input', () => {
+    hideAllAC();
+    const field = inp.dataset.field;
+    const panel = document.querySelector('.ui-autocomplete-panel[data-for="'+field+'"]');
+    panel.innerHTML = '<ul class="ui-autocomplete-items"><li>'+SUGGEST[field]+'</li></ul>';
+    panel.style.display = 'block';
+  });
+});
+document.addEventListener('click', (e) => {
+  const li = e.target.closest('.ui-autocomplete-panel li');
+  if (!li) return;
+  const panel = li.closest('.ui-autocomplete-panel');
+  const field = panel.dataset.for;
+  const inp = document.querySelector('input.ac[data-field="'+field+'"]');
+  inp.value = li.textContent;
+  captured[field] = li.textContent;
+  hideAllAC();
+  render();
+});
+
+// Calendar: build July 2026 days; clicking the date input opens it; day click records.
+const days = document.getElementById('days');
+let row = '<tr>';
+for (let d = 1; d <= 31; d++) {
+  row += '<td><a href="javascript:void(0)">'+d+'</a></td>';
+  if (d % 7 === 0) { row += '</tr><tr>'; }
+}
+days.innerHTML = row + '</tr>';
+const dateInput = document.querySelector('input.date');
+const datepicker = document.querySelector('.ui-datepicker');
+dateInput.addEventListener('click', () => { datepicker.style.display = 'block'; });
+datepicker.addEventListener('click', (e) => {
+  const a = e.target.closest('.ui-datepicker-calendar td a');
+  if (!a) return;
+  const month = document.querySelector('.ui-datepicker-month').textContent.trim();
+  const year = document.querySelector('.ui-datepicker-year').textContent.trim();
+  const mm = String(MONTHS.indexOf(month) + 1).padStart(2, '0');
+  const dd = String(a.textContent.trim()).padStart(2, '0');
+  captured.date = dd + '-' + mm + '-' + year;
+  dateInput.value = dd + '/' + mm + '/' + year;
+  datepicker.style.display = 'none';
+  render();
+});
+
+// Dropdowns (quota + class): click trigger to open, click option to record.
+document.querySelectorAll('p-dropdown').forEach(dd => {
+  const trigger = dd.querySelector('.pdrop');
+  const panel = dd.querySelector('.ui-dropdown-panel');
+  trigger.addEventListener('click', () => {
+    document.querySelectorAll('.ui-dropdown-panel').forEach(p => { if (p !== panel) p.style.display='none'; });
+    panel.style.display = (panel.style.display === 'block') ? 'none' : 'block';
+  });
+  panel.addEventListener('click', (e) => {
+    const li = e.target.closest('li');
+    if (!li) return;
+    trigger.textContent = li.textContent;
+    if (dd.id === 'journeyQuota') captured.quota = li.textContent;
+    else captured.travelClass = li.textContent;
+    panel.style.display = 'none';
+    render();
+  });
+});
+
+document.querySelector('button.search-btn').addEventListener('click', () => {
+  captured.searched = true;
+  render();
+});
+render();
+</script>
+</body>
+</html>
